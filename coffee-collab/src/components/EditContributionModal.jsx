@@ -31,6 +31,8 @@ export function EditContributionModal({ isOpen, contributionId, onClose, onSucce
   const [arrivalEvidencePreview, setArrivalEvidencePreview] = useState(null)
   const [arrivalEvidenceURL, setArrivalEvidenceURL] = useState(null)
   const [arrivalDate, setArrivalDate] = useState('')
+  const [isDivided, setIsDivided] = useState(false)
+  const [selectedParticipants, setSelectedParticipants] = useState([])
 
   // Load contribution data when modal opens
   useEffect(() => {
@@ -64,10 +66,21 @@ export function EditContributionModal({ isOpen, contributionId, onClose, onSucce
         setQuantityKg(contribution.quantityKg?.toString() || '')
         setPurchaseEvidenceURL(contribution.purchaseEvidence || null)
         setArrivalEvidenceURL(contribution.arrivalEvidence || null)
+        setIsDivided(contribution.isDivided || false)
         
         if (contribution.arrivalDate) {
           const arrivalDateObj = contribution.arrivalDate?.toDate?.() || new Date(contribution.arrivalDate)
           setArrivalDate(arrivalDateObj.toISOString().split('T')[0])
+        }
+        
+        // Load contribution details if divided
+        if (contribution.isDivided && contribution.details) {
+          const participantIds = contribution.details
+            .filter(detail => detail.userId !== contribution.userId)
+            .map(detail => detail.userId)
+          setSelectedParticipants(participantIds)
+        } else {
+          setSelectedParticipants([])
         }
         
         // Load product data
@@ -211,7 +224,9 @@ export function EditContributionModal({ isOpen, contributionId, onClose, onSucce
         value: parseFloat(value),
         quantityKg: parseFloat(quantityKg),
         productId: productId,
-        arrivalDate: arrivalDate || null
+        arrivalDate: arrivalDate || null,
+        isDivided: isDivided,
+        participantUserIds: isDivided ? selectedParticipants : []
       }
 
       // Only update evidence URLs if we have new ones
@@ -392,6 +407,94 @@ export function EditContributionModal({ isOpen, contributionId, onClose, onSucce
                 }}
               />
             </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', color: '#666', fontWeight: 'bold' }}>
+                Rachar compra
+              </label>
+              <div style={{ display: 'flex', gap: '24px', alignItems: 'center' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    checked={!isDivided}
+                    onChange={() => {
+                      setIsDivided(false)
+                      setSelectedParticipants([])
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  <span>Não</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    checked={isDivided}
+                    onChange={() => setIsDivided(true)}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  <span>Sim</span>
+                </label>
+              </div>
+            </div>
+
+            {isDivided && (
+              <div style={{ marginBottom: '16px', padding: '16px', background: '#FFF8E7', borderRadius: '8px', border: '2px solid #D2691E' }}>
+                <label style={{ display: 'block', marginBottom: '12px', color: '#666', fontWeight: 'bold' }}>
+                  Selecionar colaboradores que vão rachar:
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+                  {users.filter(u => u.id !== (selectedUserId || user.uid)).map((u) => (
+                    <div
+                      key={u.id}
+                      onClick={() => {
+                        if (selectedParticipants.includes(u.id)) {
+                          setSelectedParticipants(selectedParticipants.filter(id => id !== u.id))
+                        } else {
+                          setSelectedParticipants([...selectedParticipants, u.id])
+                        }
+                      }}
+                      style={{
+                        padding: '12px',
+                        border: selectedParticipants.includes(u.id) ? '3px solid #D2691E' : '2px solid #DDD',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        textAlign: 'center',
+                        background: selectedParticipants.includes(u.id) ? '#FFF' : '#FFF',
+                        transition: 'all 150ms ease'
+                      }}
+                    >
+                      {u.photoURL && (
+                        <img
+                          src={u.photoURL}
+                          alt={u.name}
+                          style={{
+                            width: '48px',
+                            height: '48px',
+                            borderRadius: '50%',
+                            marginBottom: '8px',
+                            objectFit: 'cover'
+                          }}
+                        />
+                      )}
+                      <div style={{ fontSize: '12px', color: '#666' }}>{u.name}</div>
+                    </div>
+                  ))}
+                </div>
+                {value && quantityKg && (
+                  <div style={{ marginTop: '12px', padding: '12px', background: '#FFF', borderRadius: '8px' }}>
+                    <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
+                      <strong>Total de pessoas:</strong> {selectedParticipants.length + 1} (incluindo você)
+                    </div>
+                    <div style={{ fontSize: '14px', color: '#666', marginBottom: '4px' }}>
+                      <strong>Valor por pessoa:</strong> R$ {((parseFloat(value) || 0) / (selectedParticipants.length + 1)).toFixed(2)}
+                    </div>
+                    <div style={{ fontSize: '14px', color: '#666' }}>
+                      <strong>Quantidade por pessoa:</strong> {((parseFloat(quantityKg) || 0) / (selectedParticipants.length + 1)).toFixed(2)} kg
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', marginBottom: '8px', color: '#666', fontWeight: 'bold' }}>

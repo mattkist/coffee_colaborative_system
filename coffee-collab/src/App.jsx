@@ -11,6 +11,7 @@ import { Home } from './pages/Home'
 import { Settings } from './pages/Settings'
 import { Votes } from './pages/Votes'
 import { Contributions } from './pages/Contributions'
+import { Compensations } from './pages/Compensations'
 import { Products } from './pages/Products'
 import { Users } from './pages/Users'
 
@@ -60,6 +61,14 @@ export function App() {
           element={
             <ProtectedRoute requireActive>
               <Contributions />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/compensations"
+          element={
+            <ProtectedRoute requireActive>
+              <Compensations />
             </ProtectedRoute>
           }
         />

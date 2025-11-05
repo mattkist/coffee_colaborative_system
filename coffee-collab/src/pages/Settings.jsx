@@ -3,41 +3,33 @@ import { useState, useEffect } from 'react'
 import { Layout } from '../components/Layout'
 import { useAuth } from '../hooks/useAuth'
 import { useUserProfile } from '../hooks/useUserProfile'
-import { updateUserProfile } from '../services/userService'
-import { getCalculationBaseMonths, setCalculationBaseMonths } from '../services/configurationService'
+import { updateUserProfile, migrateAllUserBalances } from '../services/userService'
 
 export function Settings() {
   const { user } = useAuth()
   const { profile, refreshProfile } = useUserProfile()
-  const [calculationMonths, setCalculationMonths] = useState(6)
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
+  const [migrating, setMigrating] = useState(false)
 
   useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const months = await getCalculationBaseMonths()
-        setCalculationMonths(months)
-      } catch (error) {
-        console.error('Error loading settings:', error)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    loadSettings()
+    setLoading(false)
   }, [])
 
-  const handleSaveMonths = async () => {
-    setSaving(true)
+  const handleMigrateBalances = async () => {
+    if (!confirm('Esta ação irá recalcular os saldos de todos os usuários baseado nas contribuições e compensações existentes. Deseja continuar?')) {
+      return
+    }
+
+    setMigrating(true)
     try {
-      await setCalculationBaseMonths(calculationMonths)
-      alert('Configuração salva com sucesso!')
+      const result = await migrateAllUserBalances()
+      alert(`Migração concluída! ${result.message}`)
+      window.location.reload() // Reload to show updated balances
     } catch (error) {
-      console.error('Error saving settings:', error)
-      alert('Erro ao salvar configuração')
+      console.error('Error migrating balances:', error)
+      alert('Erro ao migrar saldos: ' + error.message)
     } finally {
-      setSaving(false)
+      setMigrating(false)
     }
   }
 
@@ -141,42 +133,32 @@ export function Settings() {
               Configurações do Sistema
             </h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '8px', color: '#666', fontWeight: 'bold' }}>
-                  Quantidade de Meses para Base de Cálculo
-                </label>
-                <input
-                  type="number"
-                  value={calculationMonths}
-                  onChange={(e) => setCalculationMonths(parseInt(e.target.value) || 6)}
-                  min="1"
-                  max="24"
+              <div style={{ padding: '16px', background: 'rgba(139, 69, 19, 0.1)', borderRadius: '8px' }}>
+                <h3 style={{ fontSize: '18px', color: '#8B4513', marginBottom: '8px' }}>
+                  Migração de Saldos
+                </h3>
+                <p style={{ fontSize: '14px', color: '#666', marginBottom: '16px' }}>
+                  Use esta função para recalcular os saldos de todos os usuários baseado nas contribuições e compensações existentes. 
+                  Isso é útil após a migração para o novo sistema de saldo.
+                </p>
+                <button
+                  onClick={handleMigrateBalances}
+                  disabled={migrating}
                   style={{
-                    width: '100%',
-                    padding: '12px',
-                    border: '2px solid #DDD',
+                    padding: '12px 24px',
+                    background: migrating ? '#CCC' : 'linear-gradient(135deg, #A0522D 0%, #D2691E 100%)',
+                    color: '#FFF',
+                    border: 'none',
                     borderRadius: '8px',
-                    fontSize: '16px'
+                    fontSize: '16px',
+                    fontWeight: 'bold',
+                    cursor: migrating ? 'not-allowed' : 'pointer',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)'
                   }}
-                />
+                >
+                  {migrating ? 'Migrando...' : 'Migrar Saldos de Todos os Usuários'}
+                </button>
               </div>
-              <button
-                onClick={handleSaveMonths}
-                disabled={saving}
-                style={{
-                  padding: '12px 24px',
-                  background: saving ? '#CCC' : 'linear-gradient(135deg, #A0522D 0%, #D2691E 100%)',
-                  color: '#FFF',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontSize: '16px',
-                  fontWeight: 'bold',
-                  cursor: saving ? 'not-allowed' : 'pointer',
-                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)'
-                }}
-              >
-                {saving ? 'Salvando...' : 'Salvar'}
-              </button>
             </div>
           </div>
         )}
@@ -184,4 +166,7 @@ export function Settings() {
     </Layout>
   )
 }
+
+
+
 

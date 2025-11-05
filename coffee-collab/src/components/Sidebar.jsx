@@ -6,6 +6,7 @@ import { useUserProfile } from '../hooks/useUserProfile'
 const menuItems = [
   { path: '/home', icon: '🏠', label: 'Home' },
   { path: '/contributions', icon: '📝', label: 'Contribuições' },
+  { path: '/compensations', icon: '⚖️', label: 'Compensações' },
   { path: '/votes', icon: '⭐', label: 'Votações' },
   { path: '/products', icon: '🏷️', label: 'Produtos' },
   { path: '/settings', icon: '⚙️', label: 'Settings' },
@@ -25,7 +26,7 @@ export function Sidebar() {
         top: 0,
         height: '100vh',
         width: isExpanded ? '200px' : '64px',
-        background: 'linear-gradient(135deg, #8B4513 0%, #A0522D 50%, #D2691E 100%)',
+        background: 'linear-gradient(135deg, #A0522D 0%, #CD853F 30%, #D2B48C 60%, #A0522D 100%)',
         boxShadow: '2px 0 8px rgba(0, 0, 0, 0.15)',
         transition: 'width 300ms ease',
         zIndex: 1000,
@@ -38,19 +39,31 @@ export function Sidebar() {
     >
       <div
         style={{
-          padding: '0 16px',
+          padding: '12px 16px',
           marginBottom: '24px',
+          marginLeft: '-10px',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'flex-start',
           gap: '12px'
         }}
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <span style={{ fontSize: '24px' }}>☕</span>
+        <img 
+          src="/logo_mini.png" 
+          alt="CAFÉ GRÃO" 
+          style={{ 
+            width: '56px', 
+            height: '56px',
+            objectFit: 'contain',
+            marginLeft: '0',
+            flexShrink: 0
+          }} 
+        />
         {isExpanded && (
-          <span style={{ color: '#FFF', fontWeight: 'bold', fontSize: '14px' }}>
-            CAFÉ GRÃO
+          <span style={{ color: '#8B4513', fontWeight: 'bold', fontSize: '14px' }}>
+            meu Café Grão
           </span>
         )}
       </div>
@@ -72,10 +85,10 @@ export function Sidebar() {
                 alignItems: 'center',
                 gap: '12px',
                 padding: '12px 16px',
-                margin: '4px 8px',
+                margin: '4px 0',
                 borderRadius: '8px',
                 textDecoration: 'none',
-                color: isActive ? '#FFF' : '#F5DEB3',
+                color: isActive ? '#FFF' : '#FFF8DC',
                 background: isActive ? 'rgba(255, 255, 255, 0.2)' : 'transparent',
                 transition: 'all 150ms ease',
                 cursor: 'pointer'

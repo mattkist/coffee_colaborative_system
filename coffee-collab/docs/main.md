@@ -75,6 +75,12 @@ Um sistema simples, prático e divertido que resolve o problema de "de quem é a
    - Sempre validar funcionamento local
    - Deploy apenas quando tudo estiver funcionando
 
+7. **⚠️ CONFIGURAÇÕES REMOTAS OBRIGATÓRIAS**: **SEMPRE** alertar sobre mudanças necessárias em serviços remotos
+   - **Firebase Firestore Rules**: Quando alterações estruturais são feitas no banco de dados (novas collections, subcollections, campos), as regras de segurança do Firestore **DEVEM** ser atualizadas
+   - **Google Cloud**: Quando necessário configurar novas APIs, permissões OAuth, etc.
+   - **IMPORTANTE**: Alterações no código que afetam estrutura de dados podem não funcionar sem atualizar as regras do Firestore
+   - Ver seção [Configurações de Serviços Remotos](#configurações-de-serviços-remotos) abaixo para detalhes
+
 ### Convenções de Código
 
 - **🌐 Idioma do Código**: Todo código, variáveis, nomes de funções, estruturas de banco de dados e propriedades devem estar em **INGLÊS**
@@ -88,6 +94,69 @@ Um sistema simples, prático e divertido que resolve o problema de "de quem é a
 - Nomes de arquivos em **camelCase** para hooks (`useAuth.js`)
 - Componentes React sempre começam com **letra maiúscula**
 - Funções utilitárias em **camelCase**
+
+---
+
+## ⚙️ Configurações de Serviços Remotos
+
+### ⚠️ ATENÇÃO: Leia esta seção antes de fazer alterações estruturais
+
+Toda vez que houver alterações estruturais no sistema (novas collections, subcollections, campos, etc.), é **OBRIGATÓRIO** verificar e atualizar as configurações dos serviços remotos.
+
+### Firebase Firestore Rules
+
+**O que são**: Regras de segurança que controlam quem pode ler e escrever dados no Firestore.
+
+**Quando atualizar**: 
+- Criar novas collections
+- Criar novas subcollections
+- Adicionar campos que mudam permissões de acesso
+- Mudar lógica de acesso baseada em dados
+
+**Como atualizar**:
+1. Acesse o [Firebase Console](https://console.firebase.google.com/)
+2. Selecione seu projeto
+3. Vá em **Firestore Database** → **Regras** (Rules)
+4. Edite as regras conforme necessário
+5. Clique em **Publicar** (Publish)
+
+**Arquivo local**: As regras também estão no arquivo `firestore.rules` na raiz do projeto. Este arquivo deve ser mantido atualizado e sincronizado com o Firebase Console.
+
+**⚠️ IMPORTANTE**: Sem atualizar as regras, o código pode falhar silenciosamente ou com erros de permissão. Sempre teste após atualizar as regras.
+
+### Exemplo: Quando adicionar regras para subcollections
+
+Se você criar uma subcollection (ex: `contributions/{contributionId}/contributionDetails`), você **DEVE** adicionar regras para ela:
+
+```javascript
+match /contributions/{contributionId} {
+  allow read: if request.auth != null;
+  allow create: if request.auth != null;
+  allow update, delete: if request.auth != null && (
+    resource.data.userId == request.auth.uid ||
+    isAdmin()
+  );
+  
+  // IMPORTANTE: Adicionar regras para subcollection
+  match /contributionDetails/{detailId} {
+    allow read: if request.auth != null;
+    allow write: if request.auth != null && (
+      // Mesma lógica da collection pai
+      get(/databases/$(database)/documents/contributions/$(contributionId)).data.userId == request.auth.uid ||
+      isAdmin()
+    );
+  }
+}
+```
+
+### Google Cloud
+
+**Quando configurar**:
+- Novas APIs do Google precisam ser habilitadas
+- Novas permissões OAuth são necessárias
+- Novos serviços do Google são integrados
+
+**Como configurar**: Ver documentos específicos (`FIREBASE_SETUP.md`, `GOOGLE_DRIVE_SETUP.md`)
 
 ---
 

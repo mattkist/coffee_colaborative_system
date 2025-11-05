@@ -8,3 +8,6 @@ export default defineConfig(({ mode }) => ({
   base: mode === 'production' ? '/cafe_grao/' : '/',
 }))
 
+
+
+

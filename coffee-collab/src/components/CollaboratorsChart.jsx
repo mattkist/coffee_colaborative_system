@@ -1,13 +1,13 @@
-// Collaborators ranking chart component - Bar Race with images
+// Collaborators balance chart component - Bar Race with images
 import { useEffect, useRef } from 'react'
 import * as echarts from 'echarts'
 
-export function CollaboratorsChart({ data, users }) {
+export function CollaboratorsChart({ users }) {
   const chartRef = useRef(null)
   const chartInstanceRef = useRef(null)
 
   useEffect(() => {
-    if (!chartRef.current || !data || !users) return
+    if (!chartRef.current || !users) return
 
     // Initialize chart
     if (!chartInstanceRef.current) {
@@ -16,25 +16,38 @@ export function CollaboratorsChart({ data, users }) {
 
     const chart = chartInstanceRef.current
 
-    // Create map of user data
-    const userDataMap = {}
-    data.forEach(d => {
-      userDataMap[d.userId || d.name] = d.totalKg
-    })
-
-    // Include all users, even those with 0 contributions
+    // Include all users with their balance
     const allUsersData = users.map(user => ({
       id: user.id,
       name: user.name,
       photoURL: user.photoURL,
-      totalKg: userDataMap[user.id] || 0
+      balance: user.balance || 0
     }))
 
-    // Sort by totalKg descending
-    const sortedData = [...allUsersData].sort((a, b) => b.totalKg - a.totalKg)
+    // Sort by balance descending
+    const sortedData = [...allUsersData].sort((a, b) => b.balance - a.balance)
     const names = sortedData.map(d => d.name)
-    const values = sortedData.map(d => d.totalKg)
+    const values = sortedData.map(d => d.balance)
     const photoURLs = sortedData.map(d => d.photoURL)
+
+    // Different colors for each bar
+    const barColors = [
+      '#8B4513', // SaddleBrown
+      '#A0522D', // Sienna
+      '#D2691E', // Chocolate
+      '#CD853F', // Peru
+      '#DEB887', // BurlyWood
+      '#F4A460', // SandyBrown
+      '#D2B48C', // Tan
+      '#BC8F8F', // RosyBrown
+      '#A08070', // Custom brown
+      '#8B7355', // Custom brown
+      '#6B4423', // Dark brown
+      '#9C661F', // Custom brown
+      '#C19A6B', // Custom beige-brown
+      '#8B6914', // Dark goldenrod
+      '#B8860B'  // DarkGoldenrod
+    ]
 
     // Chart configuration for bar race
     const option = {
@@ -45,9 +58,36 @@ export function CollaboratorsChart({ data, users }) {
         axisPointer: {
           type: 'shadow'
         },
+        backgroundColor: 'rgba(255, 255, 255, 0.98)',
+        borderColor: '#8B4513',
+        borderWidth: 2,
+        textStyle: {
+          color: '#333',
+          fontSize: 13
+        },
+        padding: [14, 18],
+        extraCssText: 'box-shadow: 0 4px 12px rgba(0,0,0,0.15); max-width: 320px; white-space: normal; word-wrap: break-word;',
         formatter: (params) => {
           const param = params[0]
-          return `${param.name}<br/>${param.value.toFixed(2)} kg`
+          const name = param.name
+          const value = param.value.toFixed(2)
+          return [
+            '<div style="font-weight: bold; color: #8B4513; font-size: 15px; margin-bottom: 10px;">',
+            name,
+            '</div>',
+            '<div style="margin-bottom: 12px; font-size: 14px;">',
+            'Saldo: <span style="font-weight: bold; color: #8B4513;">',
+            value,
+            ' kg</span>',
+            '</div>',
+            '<div style="font-size: 11px; color: #666; line-height: 18px; padding-top: 10px; border-top: 1px solid #E0E0E0;">',
+            'O saldo representa o quanto de café cada colaborador ainda tem em contribuições positivas.',
+            '<br/><br/>',
+            '• Quando alguém compra café, o saldo aumenta',
+            '<br/>',
+            '• Quando uma compensação é feita, todos têm o mesmo valor reduzido',
+            '</div>'
+          ].join('')
         }
       },
       grid: {
@@ -58,6 +98,7 @@ export function CollaboratorsChart({ data, users }) {
       },
       xAxis: {
         type: 'value',
+        name: 'Saldo (kg)',
         axisLabel: {
           formatter: '{value} kg'
         },
@@ -91,19 +132,22 @@ export function CollaboratorsChart({ data, users }) {
       series: [
         {
           type: 'bar',
-          data: values,
-          itemStyle: {
-            color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-              { offset: 0, color: '#8B4513' },
-              { offset: 1, color: '#D2691E' }
-            ])
-          },
+          data: values.map((value, idx) => ({
+            value,
+            itemStyle: {
+              color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                { offset: 0, color: barColors[idx % barColors.length] },
+                { offset: 1, color: barColors[(idx + 1) % barColors.length] }
+              ])
+            }
+          })),
           label: {
             show: true,
             position: 'right',
             formatter: '{c} kg',
             fontSize: 12
           },
+          name: 'Saldo',
           barWidth: 40,
           animationDelay: (idx) => idx * 50
         }
@@ -123,9 +167,9 @@ export function CollaboratorsChart({ data, users }) {
       chart.dispose()
       chartInstanceRef.current = null
     }
-  }, [data, users])
+  }, [users])
 
-  if (!data || !users || users.length === 0) {
+  if (!users || users.length === 0) {
     return (
       <div style={{ padding: '24px', textAlign: 'center', color: '#666' }}>
         Sem dados disponíveis

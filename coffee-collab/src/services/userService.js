@@ -8,7 +8,8 @@ import {
   getDocs,
   query,
   where,
-  serverTimestamp
+  serverTimestamp,
+  writeBatch
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 
@@ -41,6 +42,7 @@ export async function getOrCreateUserProfile(user) {
       photoURL: user.photoURL,
       isAdmin,
       isActive: isAdmin, // Admins are automatically active, regular users start inactive
+      balance: 0, // Initial balance is 0
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     }
@@ -117,6 +119,60 @@ export async function getAllUsers() {
     id: doc.id,
     ...doc.data()
   }))
+}
+
+/**
+ * Migrate all user balances based on contributions and compensations
+ * This function calculates balance = totalContributions - totalCompensations
+ */
+export async function migrateAllUserBalances() {
+  const { getAllContributions } = await import('./contributionService')
+  const { getAllCompensations } = await import('./compensationService')
+  
+  // Get all users
+  const users = await getAllUsers()
+  
+  // Get all contributions
+  const contributions = await getAllContributions()
+  
+  // Get all compensations
+  const compensations = await getAllCompensations()
+  
+  // Calculate balance for each user
+  const batch = writeBatch(db)
+  
+  for (const user of users) {
+    // Calculate total contributions
+    const userContributions = contributions.filter(c => c.userId === user.id)
+    const totalContributions = userContributions.reduce((sum, c) => sum + (c.quantityKg || 0), 0)
+    
+    // Calculate total compensations
+    let totalCompensations = 0
+    for (const compensation of compensations) {
+      const userDetail = compensation.details?.find(d => d.userId === user.id)
+      if (userDetail) {
+        totalCompensations += userDetail.compensationKg || 0
+      }
+    }
+    
+    // Calculate balance
+    const balance = totalContributions - totalCompensations
+    
+    // Update user balance
+    const userRef = doc(db, 'users', user.id)
+    batch.update(userRef, {
+      balance: Math.max(0, balance),
+      updatedAt: serverTimestamp()
+    })
+  }
+  
+  await batch.commit()
+  
+  return {
+    success: true,
+    usersUpdated: users.length,
+    message: `Balances updated for ${users.length} users`
+  }
 }
 
 /**

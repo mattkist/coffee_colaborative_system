@@ -9,7 +9,6 @@ import { getAllContributions, getContributionsByUser, getContributionsMissingArr
 import { getAllProducts } from '../services/productService'
 import { getAllVotes, getVotesByUser } from '../services/voteService'
 import { getActiveUsers } from '../services/userService'
-import { getCalculationBaseMonths } from '../services/configurationService'
 import { NewContributionModal } from '../components/NewContributionModal'
 import { NewProductModal } from '../components/NewProductModal'
 import { EditContributionModal } from '../components/EditContributionModal'
@@ -40,7 +39,6 @@ export function Home() {
     priceTrend: null // { currentAvg, previousAvg, percentage, direction }
   })
   const [allContributions, setAllContributions] = useState([])
-  const [calculationBaseMonths, setCalculationBaseMonths] = useState(6)
   const [allUsers, setAllUsers] = useState([])
   const [alerts, setAlerts] = useState({
     missingArrival: [],
@@ -55,44 +53,18 @@ export function Home() {
     try {
       setLoading(true)
       
-      const [contributions, allContribs, users, baseMonths] = await Promise.all([
+      const [contributions, allContribs, users] = await Promise.all([
         getContributionsByUser(user.uid),
         getAllContributions(),
-        getActiveUsers(),
-        getCalculationBaseMonths()
+        getActiveUsers()
       ])
-
-      setCalculationBaseMonths(baseMonths || 6)
 
       // User stats
       const totalValue = contributions.reduce((sum, c) => sum + (c.value || 0), 0)
       const totalKg = contributions.reduce((sum, c) => sum + (c.quantityKg || 0), 0)
       setUserStats({ totalValue, totalKg })
 
-      // Calculate date range for ranking
-      const endDate = new Date()
-      const startDate = new Date()
-      startDate.setMonth(startDate.getMonth() - baseMonths)
-
-      // Calculate collaborators ranking - include all users even with 0
-      const collaboratorsRanking = users.map(user => {
-        const userContribs = allContribs.filter(c => {
-          const contribDate = c.purchaseDate?.toDate?.() || new Date(c.purchaseDate)
-          return c.userId === user.id && contribDate >= startDate && contribDate <= endDate
-        })
-        
-        const totalKg = userContribs.reduce((sum, c) => sum + (c.quantityKg || 0), 0)
-        
-        return {
-          userId: user.id,
-          name: user.name,
-          photoURL: user.photoURL,
-          totalKg
-        }
-      }) // Include all users, don't filter out zeros
-
-      setCollaboratorsData(collaboratorsRanking)
-      setAllUsers(users) // Store users for chart component
+      setAllUsers(users) // Store users for chart component (users already have balance field)
 
       // Calculate indicators
       const allKg = allContribs.reduce((sum, c) => sum + (c.quantityKg || 0), 0)
@@ -116,11 +88,11 @@ export function Home() {
 
       setAllContributions(allContribs)
 
-      // Calculate new indicators
-      calculateNewIndicators(allContribs, users, collaboratorsRanking, baseMonths)
+      // Calculate new indicators (using balance instead of period-based calculation)
+      calculateNewIndicators(allContribs, users)
 
       // Check for alerts
-      await checkAlerts(user.uid, allContribs, collaboratorsRanking)
+      await checkAlerts(user.uid, allContribs, users)
     } catch (error) {
       console.error('Error loading data:', error)
     } finally {
@@ -128,13 +100,19 @@ export function Home() {
     }
   }
 
-  const calculateNewIndicators = (allContribs, users, collaboratorsRanking, baseMonths) => {
-    // 1. Próximo colaborador na fila (menor contribuição no período)
-    const sortedRanking = [...collaboratorsRanking].sort((a, b) => a.totalKg - b.totalKg)
-    const nextInQueue = sortedRanking.length > 0 ? {
-      name: sortedRanking[0].name,
-      photoURL: sortedRanking[0].photoURL,
-      totalKg: sortedRanking[0].totalKg
+  const calculateNewIndicators = (allContribs, users) => {
+    // 1. Próximo colaborador na fila (menor saldo)
+    const usersWithBalance = users.map(user => ({
+      userId: user.id,
+      name: user.name,
+      photoURL: user.photoURL,
+      balance: user.balance || 0
+    }))
+    const sortedByBalance = [...usersWithBalance].sort((a, b) => a.balance - b.balance)
+    const nextInQueue = sortedByBalance.length > 0 ? {
+      name: sortedByBalance[0].name,
+      photoURL: sortedByBalance[0].photoURL,
+      balance: sortedByBalance[0].balance
     } : null
 
     // 2. Projeção de estoque (baseado em consumo médio e última compra)
@@ -154,10 +132,10 @@ export function Home() {
         const lastArrivalDate = lastArrival.arrivalDateObj
         const lastQuantityKg = lastArrival.quantityKg || 0
         
-        // Calcular consumo médio mensal (kg)
+        // Calcular consumo médio mensal (kg) - usar últimos 6 meses como base
         const endDate = new Date()
         const startDate = new Date()
-        startDate.setMonth(startDate.getMonth() - baseMonths)
+        startDate.setMonth(startDate.getMonth() - 6)
         
         const contributionsInPeriod = allContribs.filter(c => {
           const contribDate = c.purchaseDate?.toDate?.() || new Date(c.purchaseDate)
@@ -165,7 +143,7 @@ export function Home() {
         })
         
         const totalKgInPeriod = contributionsInPeriod.reduce((sum, c) => sum + (c.quantityKg || 0), 0)
-        const avgMonthlyConsumption = totalKgInPeriod / Math.max(baseMonths, 1)
+        const avgMonthlyConsumption = totalKgInPeriod / 6
         const avgDailyConsumption = avgMonthlyConsumption / 30
         
         // Calcular dias desde a chegada
@@ -191,10 +169,10 @@ export function Home() {
       }
     }
 
-    // 3. Gasto médio por colaborador ativo (no período de cálculo)
+    // 3. Gasto médio por colaborador ativo (últimos 6 meses)
     const endDate = new Date()
     const startDate = new Date()
-    startDate.setMonth(startDate.getMonth() - baseMonths)
+    startDate.setMonth(startDate.getMonth() - 6)
     
     const contributionsInPeriod = allContribs.filter(c => {
       const contribDate = c.purchaseDate?.toDate?.() || new Date(c.purchaseDate)
@@ -262,7 +240,7 @@ export function Home() {
     })
   }
 
-  const checkAlerts = async (userId, allContribs, collaboratorsRanking) => {
+  const checkAlerts = async (userId, allContribs, users) => {
     try {
       // 1. Check for contributions missing arrival
       const missingArrival = await getContributionsMissingArrival(userId)
@@ -273,11 +251,15 @@ export function Home() {
       const userVotedProductIds = new Set(userVotes.map(v => v.productId))
       const missingVotes = allProducts.filter(p => !userVotedProductIds.has(p.id))
       
-      // 3. Check if user is in last place (or tied for last)
-      const sortedRanking = [...collaboratorsRanking].sort((a, b) => b.totalKg - a.totalKg)
-      const lastPlaceKg = sortedRanking[sortedRanking.length - 1]?.totalKg || 0
-      const userRanking = sortedRanking.find(r => r.userId === userId)
-      const isLastPlace = userRanking && userRanking.totalKg === lastPlaceKg && lastPlaceKg >= 0
+      // 3. Check if user has the lowest balance (or tied for lowest)
+      const usersWithBalance = users.map(user => ({
+        userId: user.id,
+        balance: user.balance || 0
+      }))
+      const sortedByBalance = [...usersWithBalance].sort((a, b) => a.balance - b.balance)
+      const lowestBalance = sortedByBalance[0]?.balance || 0
+      const userBalance = users.find(u => u.id === userId)?.balance || 0
+      const isLastPlace = userBalance === lowestBalance && lowestBalance >= 0
       
       setAlerts({
         missingArrival: missingArrival || [],
@@ -320,7 +302,7 @@ export function Home() {
           style={{
             background: 'rgba(255, 255, 255, 0.95)',
             borderRadius: '16px',
-            padding: '24px',
+            padding: '0px 24px',
             marginBottom: '24px',
             boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
             display: 'flex',
@@ -330,11 +312,18 @@ export function Home() {
             gap: '16px'
           }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <h1 style={{ fontSize: '32px', color: '#8B4513', margin: 0 }}>CAFÉ GRÃO</h1>
-            <p style={{ fontSize: '14px', color: '#666', margin: 0, fontStyle: 'italic' }}>
-              Controle Automático de Fornecimento, Estoque e Gerenciamento de Registro de Abastecimento Operacional
-            </p>
+          <div style={{ marginTop: '-100px', marginBottom: '-80px', marginLeft: '-70px' }}>
+            <img 
+              src="/meuCafeGrao_logo_transparent.png" 
+              alt="CAFÉ GRÃO" 
+              style={{ 
+                height: '390px', 
+                width: 'auto',
+                maxWidth: '950px',
+                objectFit: 'contain',
+                display: 'block'
+              }} 
+            />
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
@@ -368,6 +357,9 @@ export function Home() {
               />
               <div>
                 <div style={{ fontWeight: 'bold', color: '#8B4513' }}>{profile.name}</div>
+                <div style={{ fontSize: '14px', color: '#666' }}>
+                  Saldo Atual: {(allUsers.find(u => u.id === user.uid)?.balance || 0).toFixed(2)} kg
+                </div>
                 <div style={{ fontSize: '14px', color: '#666' }}>
                   Total: R$ {userStats.totalValue.toFixed(2)} | {userStats.totalKg.toFixed(2)} kg
                 </div>
@@ -600,11 +592,11 @@ export function Home() {
             >
               <div style={{ flex: 1 }}>
                 <h3 style={{ fontSize: '18px', color: '#8B4513', margin: '0 0 8px 0', fontWeight: 'bold' }}>
-                  📊 Menor contribuição dos últimos {calculationBaseMonths} meses detectada!
+                  📊 Menor saldo detectado!
                 </h3>
                 <p style={{ fontSize: '14px', color: '#666', margin: 0 }}>
-                  Você está na última posição (ou dividindo a última) no ranking de contribuições dos últimos {calculationBaseMonths} meses.
-                  {collaboratorsData.find(c => c.userId === user.uid)?.totalKg === 0 && ' Que tal começar a contribuir?'}
+                  Você está na última posição (ou dividindo a última) no ranking de saldo. Você é o próximo da fila para comprar café!
+                  {(allUsers.find(u => u.id === user.uid)?.balance || 0) === 0 && ' Que tal começar a contribuir?'}
                 </p>
               </div>
             </div>
@@ -623,9 +615,9 @@ export function Home() {
             }}
           >
             <h2 style={{ fontSize: '20px', color: '#8B4513', marginBottom: '16px' }}>
-              Colaboradores
+              Saldo dos Colaboradores
             </h2>
-            <CollaboratorsChart data={collaboratorsData} users={allUsers} />
+            <CollaboratorsChart users={allUsers} />
           </div>
 
           {/* Indicadores - 1 column */}
@@ -706,7 +698,7 @@ export function Home() {
                     {newIndicators.nextInQueue.name}
                   </div>
                   <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                    {newIndicators.nextInQueue.totalKg.toFixed(2)} kg no período
+                    Saldo: {newIndicators.nextInQueue.balance.toFixed(2)} kg
                   </div>
                 </div>
               </div>

@@ -131,3 +131,6 @@ export async function updateProductAverageRating(productId) {
   await updateProduct(productId, { averageRating: roundedRating })
 }
 
+
+
+

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { Layout } from '../components/Layout'
 import { useAuth } from '../hooks/useAuth'
-import { getAllContributions } from '../services/contributionService'
+import { getAllContributions, getContributionDetails } from '../services/contributionService'
 import { getActiveUsers } from '../services/userService'
 import { getAllProducts, getProductById } from '../services/productService'
 import { useUserProfile } from '../hooks/useUserProfile'
@@ -42,7 +42,23 @@ export function Contributions() {
         getAllProducts()
       ])
       
-      setAllContributions(contribs)
+      // Load details for divided contributions
+      const contribsWithDetails = await Promise.all(
+        contribs.map(async (contrib) => {
+          if (contrib.isDivided) {
+            try {
+              const details = await getContributionDetails(contrib.id)
+              return { ...contrib, details }
+            } catch (error) {
+              console.error(`Error loading details for contribution ${contrib.id}:`, error)
+              return contrib
+            }
+          }
+          return contrib
+        })
+      )
+      
+      setAllContributions(contribsWithDetails)
       setAllUsers(usersList)
       setAllProducts(productsList)
       
@@ -61,7 +77,7 @@ export function Contributions() {
       setProductsMap(productsMapObj)
       
       // Apply filters and sorting
-      applyFiltersAndSort(contribs, filters, sortBy, sortOrder)
+      applyFiltersAndSort(contribsWithDetails, filters, sortBy, sortOrder)
     } catch (error) {
       console.error('Error loading contributions:', error)
     } finally {
@@ -411,9 +427,30 @@ export function Contributions() {
                             }}
                           />
                         )}
-                        <div>
-                          <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#8B4513' }}>
-                            {contributionUser?.name || 'Usuário desconhecido'}
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#8B4513' }}>
+                              {contributionUser?.name || 'Usuário desconhecido'}
+                            </div>
+                            {contribution.isDivided && contribution.details && contribution.details.length > 0 && (() => {
+                              const totalParticipants = contribution.details.length
+                              const additionalCollaborators = totalParticipants - 1
+                              const valuePerPerson = contribution.value / totalParticipants
+                              const quantityPerPerson = contribution.quantityKg / totalParticipants
+                              return (
+                                <div style={{ 
+                                  fontSize: '12px', 
+                                  color: '#D2691E', 
+                                  background: '#FFF8E7',
+                                  padding: '4px 8px',
+                                  borderRadius: '4px',
+                                  border: '1px solid #D2691E'
+                                }}>
+                                  +{additionalCollaborators} colaborador{additionalCollaborators > 1 ? 'es' : ''} 
+                                  {' '}(R$ {valuePerPerson.toFixed(2)} - {quantityPerPerson.toFixed(2)}Kg cada)
+                                </div>
+                              )
+                            })()}
                           </div>
                           <div style={{ fontSize: '14px', color: '#666' }}>
                             {purchaseDate.toLocaleDateString('pt-BR')}

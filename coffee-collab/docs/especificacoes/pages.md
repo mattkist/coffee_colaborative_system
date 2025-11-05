@@ -33,7 +33,7 @@ Este documento detalha cada página/tela do sistema, seus componentes, comportam
 ```
 
 ### Elementos Visuais
-- **Nome grande**: "CAFÉ GRÃO" - Tipografia destacada
+- **Logo**: Logo transparente do sistema (meuCafeGrao_logo_transparent.png) - Imagem destacada
 - **Subtítulo**: Texto completo do acrônimo com letras coloridas para destacar "C A F É G R Ã O"
 - **Botão de login**: Centralizado, destaque visual
 
@@ -126,8 +126,8 @@ Este documento detalha cada página/tela do sistema, seus componentes, comportam
 ```
 
 **Elementos do Header**:
-- **Nome do sistema**: "CAFÉ GRÃO" (esquerda)
-- **Slogan**: "Controle Automático de Fornecimento, Estoque e Gerenciamento de Registro de Abastecimento Operacional" (logo abaixo do título, em itálico e tamanho menor)
+- **Logo do sistema**: Logo transparente (meuCafeGrao_logo_transparent.png) (esquerda)
+- **Slogan**: "Controle Automático de Fornecimento, Estoque e Gerenciamento de Registro de Abastecimento Operacional" (logo abaixo do logo, em itálico e tamanho menor)
 - **Foto do usuário**: Circular, clicável (vai para Settings)
 - **Nome do usuário**: Ao lado da foto
 - **Total de Contribuições**: Valor total já contribuído pelo usuário
@@ -182,7 +182,7 @@ Este documento detalha cada página/tela do sistema, seus componentes, comportam
 - **Formato**: Gráfico de barras horizontal (ECharts)
 - **Dados**: Nome e total de KGs dos últimos X meses (baseado em `calculationBaseMonths`)
 - **Base de cálculo**: Apenas contribuições dentro de `calculationBaseMonths` meses
-- **Visual**: Barras horizontais com gradiente de marrom/café (tema do sistema)
+- **Visual**: Barras horizontais com cores diferentes (cada barra tem uma cor única em tons de marrom/café do tema do sistema)
 - **Ordenação**: Do maior para o menor contribuidor
 - **Tooltip**: Mostra nome e quantidade em kg ao passar o mouse
 - **Interatividade**: Hover mostra detalhes, labels mostram valores
@@ -335,25 +335,33 @@ Este documento detalha cada página/tela do sistema, seus componentes, comportam
    - Permitir decimais
    - Obrigatório
 
-5. **Café/Produto** *
+5. **Rachar compra**
+   - Radio buttons: "Não" (padrão) / "Sim"
+   - Se "Sim":
+     - Mostra lista de usuários ativos (exceto o comprador) para seleção
+     - Usuários são selecionados/deselecionados clicando nos cards
+     - Mostra resumo: total de pessoas, valor por pessoa, quantidade por pessoa
+     - O comprador sempre está incluído automaticamente
+
+6. **Café/Produto** *
    - **Componente especial**: Busca com filtro em tempo real
    - Ao digitar, filtra produtos existentes
    - Pode selecionar produto existente OU digitar nome novo
    - Se digitar nome novo (sem selecionar): cria produto automaticamente ao salvar
 
-6. **Evidência Compra** *
+7. **Evidência Compra** *
    - Campo de texto para colar link do Google Drive OU
    - Upload de arquivo (upload automático ainda não configurado)
    - Preview da imagem selecionada ou confirmação do link
    - Obrigatório: ou link do Google Drive ou arquivo
 
-7. **Evidência Chegada**
+8. **Evidência Chegada**
    - Campo de texto para colar link do Google Drive OU
    - Upload de arquivo (upload automático ainda não configurado)
    - Preview da imagem selecionada ou confirmação do link
    - Opcional
 
-8. **Data Chegada**
+9. **Data Chegada**
    - Datepicker
    - Opcional
 
@@ -368,7 +376,13 @@ Este documento detalha cada página/tela do sistema, seus componentes, comportam
     - `averageRating`: 0
   - Se produto existente: Atualiza `averagePricePerKg` do produto:
     - Recalcula: soma todos os valores / soma todos os KGs
-  - Cria documento em `contributions`
+  - Cria documento em `contributions` com `isDivided` (false por padrão)
+  - Se `isDivided: true`:
+    - Cria documentos na subcollection `contributionDetails` para cada participante
+    - Divide `quantityKg` e `value` igualmente entre todos os participantes (incluindo comprador)
+    - Atualiza saldo de todos os participantes com a quantidade atribuída
+  - Se `isDivided: false`:
+    - Atualiza apenas o saldo do comprador com a quantidade total
   - Processamento de imagens: converte link do Google Drive para URL de imagem direta, ou permite upload manual
 
 - **Validações**:
@@ -518,6 +532,7 @@ Este documento detalha cada página/tela do sistema, seus componentes, comportam
 
 - **Informações exibidas nos cards**:
   - Foto e nome do usuário
+  - **Indicador de rachamento**: Para colaborações divididas (`isDivided: true`), mostra badge com "+{x} colaboradores (R$ {y} - {z}Kg cada)"
   - Data da compra
   - Nome do produto
   - Preço médio por kg do produto
@@ -596,8 +611,13 @@ Este documento detalha cada página/tela do sistema, seus componentes, comportam
 
 ### Estados
 
-- **Collapsed**: Apenas ícones visíveis
-- **Expanded**: Ícones + textos
+- **Collapsed**: Apenas logo mini visível
+- **Expanded**: Logo mini + textos
+
+### Logo
+
+- **Ícone do menu**: Logo mini (logo_mini.png) substitui o emoji de xícara
+- **Fundo**: Menu clareado com gradiente bege claro para melhor visibilidade do logo marrom
 
 ### Botões
 

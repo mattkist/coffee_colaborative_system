@@ -44,6 +44,7 @@ Armazena perfis de usuários do sistema.
   photoURL: string | null, // URL da foto de perfil
   isAdmin: boolean,        // Indica se o usuário é administrador
   isActive: boolean,       // Indica se o usuário está ativo
+  balance: number,         // Saldo atual do usuário (em kg) - default: 0
   createdAt: Timestamp,    // Data de criação do perfil
   updatedAt: Timestamp     // Data de última atualização
 }
@@ -76,8 +77,23 @@ Armazena todas as contribuições (compras de café) registradas.
   purchaseEvidence: string | null, // URL da imagem/comprovante da compra
   arrivalEvidence: string | null,  // URL da imagem/evidência da chegada
   arrivalDate: Timestamp | null,   // Data de chegada do café
+  isDivided: boolean,               // Indica se a compra foi rachada entre colaboradores (default: false)
   createdAt: Timestamp,            // Data de criação do registro
   updatedAt: Timestamp             // Data de última atualização
+}
+```
+
+**Subcollection: `contributionDetails` (Detalhe)**
+
+Quando `isDivided: true`, cada documento na subcollection representa um participante do rachamento:
+```javascript
+{
+  id: string,                    // ID único do documento
+  userId: string,                 // FK: ID do usuário participante (reference to users)
+  userName: string,               // Nome do usuário (para exibição)
+  quantityKg: number,             // Quantidade de kg atribuída a este usuário
+  value: number,                  // Valor atribuído a este usuário (R$)
+  createdAt: Timestamp           // Data de criação
 }
 ```
 
@@ -86,6 +102,14 @@ Armazena todas as contribuições (compras de café) registradas.
 - `arrivalEvidence` e `arrivalDate` são opcionais inicialmente
 - Se `arrivalEvidence` for adicionada e o produto ainda não tiver foto, essa evidência vira a foto do produto
 - Ao atualizar uma contribuição de um produto existente, recalcular `averagePricePerKg` do produto
+- Se `isDivided: true`:
+  - A quantidade e valor são divididos igualmente entre todos os participantes (incluindo o comprador)
+  - Cada participante recebe `quantityKg / totalParticipantes` e `value / totalParticipantes`
+  - O saldo de cada participante é atualizado com a quantidade atribuída a ele
+  - Os participantes são armazenados na subcollection `contributionDetails`
+- Se `isDivided: false` (ou não definido, padrão):
+  - A quantidade completa é atribuída apenas ao comprador (`userId`)
+  - O saldo do comprador é atualizado com a quantidade total
 
 **Regras de Segurança**:
 - Leitura: Todos usuários autenticados
@@ -147,6 +171,47 @@ Armazena votos/avaliações dos usuários sobre os produtos.
 **Regras de Segurança**:
 - Leitura: Todos usuários autenticados
 - Escrita: Usuário pode votar apenas para si mesmo
+
+---
+
+### 6. `compensations`
+
+Armazena compensações realizadas no sistema.
+
+**Estrutura do Documento (Mestre)**:
+```javascript
+{
+  id: string,                    // ID único do documento
+  date: Timestamp,               // Data da compensação
+  totalKg: number,               // Total de kg compensado
+  createdAt: Timestamp,          // Data de criação
+  updatedAt: Timestamp           // Data de atualização
+}
+```
+
+**Subcollection: `compensationDetails` (Detalhe)**
+
+Cada documento na subcollection representa um usuário que participou da compensação:
+```javascript
+{
+  id: string,                    // ID único do documento
+  userId: string,                 // FK: ID do usuário (reference to users)
+  userName: string,               // Nome do usuário (para exibição)
+  balanceBefore: number,         // Saldo antes da compensação
+  balanceAfter: number,          // Saldo após a compensação
+  compensationKg: number          // Quantidade de kg compensada para este usuário
+}
+```
+
+**Regras de Negócio**:
+- Compensações são criadas automaticamente quando todos os usuários ativos têm `balance > 0`
+- A compensação remove o menor saldo entre todos os usuários
+- Todos os usuários têm o mesmo valor reduzido (igual ao menor saldo)
+- Compensações podem ser criadas manualmente por admins via CRUD
+
+**Regras de Segurança**:
+- Leitura: Todos usuários autenticados
+- Escrita: Apenas administradores
 
 ---
 
@@ -216,33 +281,50 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return request.auth != null && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+    
     // Configurations - leitura livre, escrita apenas por admins
     match /configurations/{configId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+      allow write: if request.auth != null && isAdmin();
     }
     
     // Users - leitura livre, escrita própria ou por admin
     match /users/{userId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && (
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update, delete: if request.auth != null && (
         request.auth.uid == userId ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true
+        isAdmin()
       );
     }
     
-    // Contributions - leitura livre, escrita por todos (admins podem criar para qualquer um)
+    // Contributions - leitura livre, escrita por todos autenticados
     match /contributions/{contributionId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null;
       allow update, delete: if request.auth != null && (
         resource.data.userId == request.auth.uid ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true
+        isAdmin()
       );
+      
+      // Contribution details subcollection (para contribuições rachadas)
+      match /contributionDetails/{detailId} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null && (
+          // Permite se o usuário é o dono da contribuição ou admin
+          get(/databases/$(database)/documents/contributions/$(contributionId)).data.userId == request.auth.uid ||
+          isAdmin()
+        );
+      }
     }
     
-    // Products - leitura livre, escrita por todos
+    // Products - leitura livre, escrita por todos autenticados
     match /products/{productId} {
       allow read: if request.auth != null;
       allow write: if request.auth != null;
@@ -251,13 +333,32 @@ service cloud.firestore {
     // Votes - leitura livre, escrita apenas própria
     match /votes/{voteId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if request.auth != null && 
+        resource.data.userId == request.auth.uid;
+    }
+    
+    // Compensations - leitura e escrita livre para usuários autenticados
+    match /compensations/{compensationId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+      
+      // Compensation details subcollection
+      match /compensationDetails/{detailId} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null;
+      }
     }
   }
 }
 ```
 
+**⚠️ IMPORTANTE**: Estas regras devem ser atualizadas no Firebase Console. Veja a seção [Configurações de Serviços Remotos](../main.md#configurações-de-serviços-remotos) no `main.md` para instruções detalhadas.
+
 ---
 
 **Última atualização**: Dezembro 2024
+
+
+
 

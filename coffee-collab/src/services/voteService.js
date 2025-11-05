@@ -119,3 +119,6 @@ export async function deleteVote(voteId, productId) {
   await updateProductAverageRating(productId)
 }
 
+
+
+
