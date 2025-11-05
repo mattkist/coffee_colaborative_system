@@ -51,7 +51,7 @@ export function Sidebar() {
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <img 
-          src="/logo_mini.png" 
+          src={`${import.meta.env.BASE_URL}logo_mini.png`}
           alt="CAFÉ GRÃO" 
           style={{ 
             width: '56px', 

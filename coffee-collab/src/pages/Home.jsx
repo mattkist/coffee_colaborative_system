@@ -314,7 +314,7 @@ export function Home() {
         >
           <div style={{ marginTop: '-100px', marginBottom: '-80px', marginLeft: '-70px' }}>
             <img 
-              src="/meuCafeGrao_logo_transparent.png" 
+              src={`${import.meta.env.BASE_URL}meuCafeGrao_logo_transparent.png`}
               alt="CAFÉ GRÃO" 
               style={{ 
                 height: '390px', 

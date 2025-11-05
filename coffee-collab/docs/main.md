@@ -81,6 +81,16 @@ Um sistema simples, prático e divertido que resolve o problema de "de quem é a
    - **IMPORTANTE**: Alterações no código que afetam estrutura de dados podem não funcionar sem atualizar as regras do Firestore
    - Ver seção [Configurações de Serviços Remotos](#configurações-de-serviços-remotos) abaixo para detalhes
 
+8. **🖼️ CAMINHOS DE ASSETS EM PRODUÇÃO**: **SEMPRE** usar `import.meta.env.BASE_URL` para imagens e assets estáticos
+   - **Problema**: Em produção no GitHub Pages, o app roda em `/cafe_grao/`, mas caminhos absolutos com `/` não funcionam
+   - **Solução**: Usar `import.meta.env.BASE_URL` que o Vite fornece automaticamente
+   - **Exemplo**: `src="/logo.png"` ❌ → `src={`${import.meta.env.BASE_URL}logo.png`}` ✅
+   - **Como funciona**: 
+     - Em desenvolvimento: `BASE_URL = "/"` (raiz)
+     - Em produção: `BASE_URL = "/cafe_grao/"` (subpath do GitHub Pages)
+   - **Aplicar para**: Todas as imagens em `public/`, favicons, e qualquer asset estático referenciado no código
+   - Ver seção [Caminhos de Assets em Produção](#caminhos-de-assets-em-produção) abaixo para detalhes
+
 ### Convenções de Código
 
 - **🌐 Idioma do Código**: Todo código, variáveis, nomes de funções, estruturas de banco de dados e propriedades devem estar em **INGLÊS**
@@ -157,6 +167,46 @@ match /contributions/{contributionId} {
 - Novos serviços do Google são integrados
 
 **Como configurar**: Ver documentos específicos (`FIREBASE_SETUP.md`, `GOOGLE_DRIVE_SETUP.md`)
+
+### Caminhos de Assets em Produção
+
+**O Problema**: Em produção no GitHub Pages, o app está hospedado em um subpath (`/cafe_grao/`), mas caminhos absolutos começando com `/` não funcionam porque procuram na raiz do domínio.
+
+**Exemplo do erro**:
+```
+Request URL: https://mattkist.github.io/meuCafeGrao_logo_transparent.png
+Status Code: 404 Not Found
+```
+
+O caminho correto deveria ser: `https://mattkist.github.io/cafe_grao/meuCafeGrao_logo_transparent.png`
+
+**A Solução**: Usar `import.meta.env.BASE_URL` que o Vite fornece automaticamente.
+
+**Como usar**:
+```javascript
+// ❌ ERRADO - Não funciona em produção
+<img src="/logo.png" alt="Logo" />
+
+// ✅ CORRETO - Funciona em dev e produção
+<img src={`${import.meta.env.BASE_URL}logo.png`} alt="Logo" />
+```
+
+**Valores de `BASE_URL`**:
+- **Desenvolvimento local**: `"/"` (raiz)
+- **Produção (GitHub Pages)**: `"/cafe_grao/"` (subpath)
+
+**Onde aplicar**:
+- Todas as imagens em `public/` referenciadas no código JSX
+- Favicons e ícones (exceto no `index.html`, que o Vite processa automaticamente)
+- Qualquer asset estático referenciado no código React
+
+**Arquivos que precisam dessa correção**:
+- `src/components/Sidebar.jsx` - Logo do menu lateral
+- `src/pages/Home.jsx` - Logo principal do header
+- `src/pages/Landing.jsx` - Logo da página inicial
+- Qualquer outro componente que referencie imagens de `public/`
+
+**Nota**: O Vite processa automaticamente referências a assets no `index.html` e CSS, então não é necessário usar `BASE_URL` nesses casos. Apenas em código JavaScript/JSX que referencia assets diretamente.
 
 ---
 
