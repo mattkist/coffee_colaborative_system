@@ -1,5 +1,5 @@
 // Protected route component for admin only
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { getUserProfile } from '../services/userService'
@@ -8,60 +8,41 @@ export function ProtectedRouteAdmin({ children }) {
   const { user, loading: authLoading } = useAuth()
   const [profile, setProfile] = useState(null)
   const [profileLoading, setProfileLoading] = useState(true)
-  const isMountedRef = useRef(true)
-  const loadingRef = useRef(false)
 
   useEffect(() => {
-    isMountedRef.current = true
-    
     const loadProfile = async () => {
       if (!user) {
-        if (isMountedRef.current) {
-          setProfileLoading(false)
-        }
+        console.log('ProtectedRouteAdmin - No user, setting loading to false')
+        setProfile(null)
+        setProfileLoading(false)
         return
       }
 
-      // Prevent multiple simultaneous loads
-      if (loadingRef.current) {
-        return
-      }
+      // Always set loading to true when we have a user
+      setProfileLoading(true)
 
       try {
-        loadingRef.current = true
+        console.log('ProtectedRouteAdmin - Loading profile for user:', user.uid)
         const userProfile = await getUserProfile(user.uid)
-        
-        // Only update state if component is still mounted
-        if (isMountedRef.current) {
-          setProfile(userProfile)
-        }
+        console.log('ProtectedRouteAdmin - Profile loaded:', userProfile)
+        setProfile(userProfile)
       } catch (error) {
-        console.error('Error loading profile:', error)
-        // Only update state if component is still mounted
-        if (isMountedRef.current) {
-          setProfile(null)
-        }
+        console.error('ProtectedRouteAdmin - Error loading profile:', error)
+        setProfile(null)
       } finally {
-        loadingRef.current = false
-        if (isMountedRef.current) {
-          setProfileLoading(false)
-        }
+        setProfileLoading(false)
       }
     }
 
-    if (user) {
-      loadProfile()
-    } else {
-      setProfileLoading(false)
-    }
-
-    return () => {
-      isMountedRef.current = false
-      loadingRef.current = false
-    }
+    loadProfile()
   }, [user])
 
-  if (authLoading || profileLoading) {
+  // Determine if we should show loading
+  // Show loading if: auth is loading, OR profile is loading, OR we have a user but no profile yet
+  const isLoading = authLoading || profileLoading || (user && !profile)
+
+  // Show loading while auth or profile is loading
+  if (isLoading) {
     return (
       <div
         style={{
@@ -79,15 +60,44 @@ export function ProtectedRouteAdmin({ children }) {
     )
   }
 
+  // No user, redirect to landing
   if (!user) {
+    console.log('ProtectedRouteAdmin: No user, redirecting to /')
     return <Navigate to="/" replace />
   }
 
-  // Check if user is admin and active
-  if (!profile || !profile.isAdmin || !profile.isActive) {
+  // No profile loaded after loading is complete, redirect to home
+  // (profileLoading is already handled above, so if we reach here, loading is complete)
+  if (!profile) {
+    console.error('ProtectedRouteAdmin: No profile loaded for user', user.uid)
     return <Navigate to="/home" replace />
   }
 
+  // Check if user is admin and active
+  const isAdmin = profile.isAdmin === true
+  const isActive = profile.isActive === true
+
+  console.log('ProtectedRouteAdmin - Profile check:', {
+    userId: user.uid,
+    isAdmin: profile.isAdmin,
+    isActive: profile.isActive,
+    isAdminBool: isAdmin,
+    isActiveBool: isActive,
+    profile: profile
+  })
+
+  if (!isAdmin) {
+    console.warn('ProtectedRouteAdmin: User is not admin. isAdmin =', profile.isAdmin)
+    return <Navigate to="/home" replace />
+  }
+
+  if (!isActive) {
+    console.warn('ProtectedRouteAdmin: User is not active. isActive =', profile.isActive)
+    return <Navigate to="/inactive" replace />
+  }
+
+  // User is admin and active, allow access
+  console.log('ProtectedRouteAdmin: Access granted!')
   return children
 }
 
