@@ -329,20 +329,54 @@ O sistema utiliza **React Router** para gerenciar múltiplas páginas dentro da 
 
 **Estrutura de Rotas**:
 ```
-/               → Home (página inicial)
-/dashboard      → Dashboard (contribuições e ações)
-/charts         → Charts (gráficos e visualizações)
+/               → Landing (página inicial)
+/inactive       → Página de usuário inativo
+/home           → Dashboard principal
+/contributions  → Gerenciamento de contribuições
+/compensations  → Gerenciamento de compensações
+/votes          → Sistema de votação
+/products       → Gerenciamento de produtos
+/settings       → Configurações do usuário
+/users          → Gerenciamento de usuários (admin)
 ```
 
 **Rotas Protegidas**:
 - Rotas que requerem autenticação usam `ProtectedRoute` ou verificação de `useAuth`
 - Usuários não autenticados são redirecionados para login
+- Rotas que requerem usuário ativo usam `ProtectedRoute` com `requireActive={true}`
+- Rotas admin usam `ProtectedRouteAdmin`
 
 **Benefícios**:
 - Separação clara de funcionalidades por página
 - Navegação intuitiva (URLs significativas)
 - Histórico do navegador funcional
 - Deep linking (acesso direto a páginas específicas)
+
+### Prevenção de Problemas de Navegação
+
+**Problema Identificado**: Navegação rápida entre páginas causava erros de Firestore channel termination (400 Bad Request) e loops de requisições.
+
+**Solução Implementada**:
+
+1. **Prevenção de Cliques Múltiplos no Sidebar**:
+   - Flag `navigatingRef` previne múltiplos cliques durante navegação
+   - Timeout de 500ms bloqueia cliques adicionais
+   - Previne navegação se já estiver na rota ativa
+
+2. **Proteção contra Race Conditions no ProtectedRoute**:
+   - Flag `isMountedRef` verifica se componente ainda está montado antes de atualizar estado
+   - Flag `loadingRef` previne múltiplas requisições simultâneas
+   - Cleanup adequado no `useEffect` para evitar memory leaks
+
+3. **Tratamento de Erros**:
+   - Erros durante carregamento de perfil não causam loops
+   - Estado é atualizado apenas se componente ainda está montado
+   - Cleanup adequado remove listeners e flags quando componente desmonta
+
+**Arquivos Modificados**:
+- `src/components/Sidebar.jsx` - Prevenção de cliques múltiplos
+- `src/components/ProtectedRoute.jsx` - Proteção contra race conditions
+- `src/components/ProtectedRouteAdmin.jsx` - Mesma proteção para rotas admin
 
 ---
 

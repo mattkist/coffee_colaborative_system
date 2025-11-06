@@ -23,20 +23,38 @@ service cloud.firestore {
     }
     
     // Users - leitura livre, escrita própria ou por admin
+    // Permite atualização do campo balance por qualquer usuário autenticado e ativo
+    // (necessário para reprocessamento de saldos após criar/editar contribuições)
     match /users/{userId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null && request.auth.uid == userId;
-      allow update, delete: if request.auth != null && (
+      allow update: if request.auth != null && (
+        // Permite atualizar próprio perfil completamente
+        request.auth.uid == userId ||
+        // Permite admin atualizar qualquer perfil completamente
+        isAdmin() ||
+        // Permite qualquer usuário autenticado e ativo atualizar apenas balance e updatedAt
+        // (para reprocessamento automático de saldos)
+        (isAuthenticatedAndActive() && 
+         // Verifica se apenas balance e updatedAt estão sendo atualizados (merge)
+         // Como usamos merge:true, verificamos se os campos críticos não mudaram
+         resource.data.email == request.resource.data.email &&
+         resource.data.name == request.resource.data.name &&
+         resource.data.isAdmin == request.resource.data.isAdmin &&
+         resource.data.isActive == request.resource.data.isActive &&
+         resource.data.photoURL == request.resource.data.photoURL)
+      );
+      allow delete: if request.auth != null && (
         request.auth.uid == userId ||
         isAdmin()
       );
     }
     
-    // Contributions - leitura livre, escrita por todos autenticados
+    // Contributions - leitura livre, escrita por todos autenticados e ativos
     match /contributions/{contributionId} {
       allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null && (
+      allow create: if request.auth != null && isAuthenticatedAndActive();
+      allow update, delete: if request.auth != null && isAuthenticatedAndActive() && (
         resource.data.userId == request.auth.uid ||
         isAdmin()
       );
@@ -44,9 +62,11 @@ service cloud.firestore {
       // Contribution details subcollection (para contribuições rachadas)
       match /contributionDetails/{detailId} {
         allow read: if request.auth != null;
-        allow write: if request.auth != null && (
-          // Permite se o usuário é o dono da contribuição ou admin
-          get(/databases/$(database)/documents/contributions/$(contributionId)).data.userId == request.auth.uid ||
+        allow create: if request.auth != null && isAuthenticatedAndActive();
+        allow update, delete: if request.auth != null && isAuthenticatedAndActive() && (
+          // Para atualização/deleção: verifica se o usuário é o dono da contribuição pai ou admin
+          (exists(/databases/$(database)/documents/contributions/$(contributionId)) &&
+           get(/databases/$(database)/documents/contributions/$(contributionId)).data.userId == request.auth.uid) ||
           isAdmin()
         );
       }

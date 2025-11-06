@@ -122,57 +122,112 @@ export async function getAllUsers() {
 }
 
 /**
- * Migrate all user balances based on contributions and compensations
- * This function calculates balance = totalContributions - totalCompensations
+ * Reprocess all user balances based on last compensation and contributions after it
+ * This function:
+ * 1. Gets the balance from the last compensation (or 0 if user wasn't in it)
+ * 2. Sums all contributions that occurred AFTER the last compensation
+ * 3. Updates only users whose new balance differs from current balance
  */
-export async function migrateAllUserBalances() {
+export async function reprocessAllUserBalances() {
   const { getAllContributions } = await import('./contributionService')
-  const { getAllCompensations } = await import('./compensationService')
+  const { getAllCompensations, getLastCompensationDate } = await import('./compensationService')
+  const { getContributionDetails } = await import('./contributionService')
   
   // Get all users
-  const users = await getAllUsers()
+  const allUsers = await getAllUsers()
+  
+  // Get last compensation date
+  const lastCompDate = await getLastCompensationDate()
+  
+  // Get last compensation details to get balances after compensation
+  let lastCompensation = null
+  if (lastCompDate) {
+    const compensations = await getAllCompensations()
+    if (compensations.length > 0) {
+      lastCompensation = compensations[0] // First one is the most recent
+    }
+  }
   
   // Get all contributions
-  const contributions = await getAllContributions()
+  const allContributions = await getAllContributions()
   
-  // Get all compensations
-  const compensations = await getAllCompensations()
+  // Filter contributions after last compensation (or all if no compensation)
+  const contributionsAfterCompensation = lastCompDate
+    ? allContributions.filter(contrib => {
+        const contribDate = contrib.purchaseDate?.toDate?.() || new Date(contrib.purchaseDate)
+        return contribDate > lastCompDate
+      })
+    : allContributions
   
-  // Calculate balance for each user
+  // Calculate new balances for each user
   const batch = writeBatch(db)
+  let usersUpdated = 0
   
-  for (const user of users) {
-    // Calculate total contributions
-    const userContributions = contributions.filter(c => c.userId === user.id)
-    const totalContributions = userContributions.reduce((sum, c) => sum + (c.quantityKg || 0), 0)
-    
-    // Calculate total compensations
-    let totalCompensations = 0
-    for (const compensation of compensations) {
-      const userDetail = compensation.details?.find(d => d.userId === user.id)
+  for (const user of allUsers) {
+    // Get balance from last compensation (or 0 if user wasn't in it)
+    let baseBalance = 0
+    if (lastCompensation && lastCompensation.details) {
+      const userDetail = lastCompensation.details.find(d => d.userId === user.id)
       if (userDetail) {
-        totalCompensations += userDetail.compensationKg || 0
+        baseBalance = userDetail.balanceAfter || 0
       }
     }
     
-    // Calculate balance
-    const balance = totalContributions - totalCompensations
+    // Calculate contributions after last compensation for this user
+    let contributionsKg = 0
     
-    // Update user balance
-    const userRef = doc(db, 'users', user.id)
-    batch.update(userRef, {
-      balance: Math.max(0, balance),
-      updatedAt: serverTimestamp()
-    })
+    for (const contrib of contributionsAfterCompensation) {
+      if (contrib.isDivided) {
+        // For divided contributions, get user's share from details
+        try {
+          const details = await getContributionDetails(contrib.id)
+          const userDetail = details.find(d => d.userId === user.id)
+          if (userDetail) {
+            contributionsKg += userDetail.quantityKg || 0
+          }
+        } catch (error) {
+          console.error(`Error loading details for contribution ${contrib.id}:`, error)
+        }
+      } else {
+        // Regular contribution - only creator gets the full amount
+        if (contrib.userId === user.id) {
+          contributionsKg += contrib.quantityKg || 0
+        }
+      }
+    }
+    
+    // Calculate new balance
+    const newBalance = Math.max(0, baseBalance + contributionsKg)
+    const currentBalance = user.balance || 0
+    
+    // Only update if balance changed
+    if (newBalance !== currentBalance) {
+      const userRef = doc(db, 'users', user.id)
+      batch.update(userRef, {
+        balance: newBalance,
+        updatedAt: serverTimestamp()
+      })
+      usersUpdated++
+    }
   }
   
   await batch.commit()
   
   return {
     success: true,
-    usersUpdated: users.length,
-    message: `Balances updated for ${users.length} users`
+    usersUpdated,
+    message: `Balances reprocessed: ${usersUpdated} user(s) updated`
   }
+}
+
+/**
+ * Migrate all user balances based on contributions and compensations
+ * This function calculates balance = totalContributions - totalCompensations
+ * NOTE: This is the old logic. For correct reprocessing, use reprocessAllUserBalances() instead
+ */
+export async function migrateAllUserBalances() {
+  // Use the new reprocess logic which is more accurate
+  return await reprocessAllUserBalances()
 }
 
 /**

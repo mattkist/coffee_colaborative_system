@@ -215,27 +215,31 @@ match /compensations/{compensationId} {
 
 ### Endpoint de Migração
 
-**Endpoint**: Função `migrateAllUserBalances()` em `userService.js`
+**Endpoint**: Função `migrateAllUserBalances()` em `userService.js` (agora chama `reprocessAllUserBalances()`)
 
 **Como usar**:
 1. Acessar a página `/settings` como administrador
 2. Na seção "Configurações do Sistema", clicar no botão "Migrar Saldos de Todos os Usuários"
 3. Confirmar a ação
 4. A função irá:
-   - Buscar todas as contribuições
-   - Buscar todas as compensações existentes
-   - Calcular saldo de cada usuário
-   - Atualizar campo `balance` em todos os usuários
+   - Buscar a última compensação (se existir)
+   - Pegar o saldo de cada usuário após a última compensação (ou 0 se não estava na compensação)
+   - Buscar todas as contribuições após a última compensação
+   - Calcular novo saldo = saldo após compensação + contribuições pós compensação
+   - Atualizar campo `balance` apenas para usuários cujo saldo mudou
 5. A página será recarregada automaticamente após a conclusão
 
-**Lógica de Cálculo**:
+**Lógica de Cálculo** (Nova):
 ```javascript
-balance = SUM(contributions.quantityKg) - SUM(compensations.compensationKg)
+// Para cada usuário:
+baseBalance = lastCompensation.balanceAfter || 0  // Saldo após última compensação
+contributionsAfterCompensation = SUM(contribs WHERE purchaseDate > lastCompDate)
+newBalance = baseBalance + contributionsAfterCompensation
 ```
 
-Se não houver compensações, `balance = total de contribuições`.
-
 **Nota**: Esta função está disponível na página Settings (`/settings`) apenas para administradores.
+
+**Importante**: A função agora usa `reprocessAllUserBalances()` que é mais precisa e reprocessa todos os saldos a partir da última compensação. Veja `balance-reprocessing.md` para detalhes completos.
 
 ---
 

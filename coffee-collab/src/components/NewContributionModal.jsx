@@ -1,5 +1,5 @@
 // Modal for creating a new contribution
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { useUserProfile } from '../hooks/useUserProfile'
 import { getActiveUsers } from '../services/userService'
@@ -22,7 +22,9 @@ export function NewContributionModal({ isOpen, onClose, onSuccess }) {
   const [quantityKg, setQuantityKg] = useState('')
   const [productSearch, setProductSearch] = useState('')
   const [selectedProductId, setSelectedProductId] = useState('')
+  const [selectedProductName, setSelectedProductName] = useState('') // Store selected product name separately
   const [isNewProduct, setIsNewProduct] = useState(false)
+  const searchTimeoutRef = useRef(null)
   const [purchaseEvidenceFile, setPurchaseEvidenceFile] = useState(null)
   const [purchaseEvidencePreview, setPurchaseEvidencePreview] = useState(null)
   const [purchaseEvidenceLink, setPurchaseEvidenceLink] = useState('')
@@ -34,17 +36,23 @@ export function NewContributionModal({ isOpen, onClose, onSuccess }) {
   const [selectedParticipants, setSelectedParticipants] = useState([])
 
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) {
+      // Reset form when modal closes
+      setProductSearch('')
+      setSelectedProductId('')
+      setSelectedProductName('')
+      setProducts([])
+      setIsNewProduct(false)
+      return
+    }
     
     const loadData = async () => {
       setLoading(true)
       try {
-        const [usersList, productsList] = await Promise.all([
-          getActiveUsers(), // Always load users for split selection
-          getAllProducts()
+        const [usersList] = await Promise.all([
+          getActiveUsers() // Always load users for split selection
         ])
         setUsers(usersList)
-        setProducts(productsList)
         setSelectedUserId(user?.uid || '')
       } catch (error) {
         console.error('Error loading data:', error)
@@ -55,28 +63,67 @@ export function NewContributionModal({ isOpen, onClose, onSuccess }) {
     }
 
     loadData()
-  }, [isOpen, profile, user])
+  }, [isOpen, user?.uid]) // Only depend on user.uid, not the whole user object
 
   useEffect(() => {
-    if (!productSearch) {
+    // Clear any pending timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current)
+      searchTimeoutRef.current = null
+    }
+
+    // If no search text, clear results immediately
+    if (!productSearch.trim()) {
       setProducts([])
+      setIsNewProduct(false)
       return
     }
 
+    // If a product is selected and search matches its name exactly, don't search
+    if (selectedProductId && selectedProductName && productSearch.trim() === selectedProductName.trim()) {
+      setProducts([])
+      setIsNewProduct(false)
+      return
+    }
+
+    // Perform search with debounce
     const searchProductsAsync = async () => {
       try {
-        const results = await searchProducts(productSearch)
-        setProducts(results)
-        setIsNewProduct(results.length === 0)
-        setSelectedProductId('')
+        const results = await searchProducts(productSearch.trim())
+        
+        // If a product is selected, check if it matches
+        if (selectedProductId && selectedProductName) {
+          const selectedProduct = results.find(p => p.id === selectedProductId && p.name === productSearch.trim())
+          if (selectedProduct) {
+            // Product matches, clear results
+            setProducts([])
+            setIsNewProduct(false)
+          } else {
+            // Product doesn't match, show results and clear selection
+            setProducts(results)
+            setIsNewProduct(results.length === 0)
+            setSelectedProductId('')
+            setSelectedProductName('')
+          }
+        } else {
+          // No product selected, show results normally
+          setProducts(results)
+          setIsNewProduct(results.length === 0)
+        }
       } catch (error) {
         console.error('Error searching products:', error)
       }
     }
 
-    const timeoutId = setTimeout(searchProductsAsync, 300)
-    return () => clearTimeout(timeoutId)
-  }, [productSearch])
+    searchTimeoutRef.current = setTimeout(searchProductsAsync, 300)
+    
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current)
+        searchTimeoutRef.current = null
+      }
+    }
+  }, [productSearch, selectedProductId, selectedProductName])
 
   const handlePurchaseEvidenceChange = (e) => {
     const file = e.target.files[0]
@@ -219,6 +266,7 @@ export function NewContributionModal({ isOpen, onClose, onSuccess }) {
       setQuantityKg('')
       setProductSearch('')
       setSelectedProductId('')
+      setSelectedProductName('')
       setIsNewProduct(false)
       setPurchaseEvidenceFile(null)
       setPurchaseEvidencePreview(null)
@@ -523,28 +571,54 @@ export function NewContributionModal({ isOpen, onClose, onSuccess }) {
               <label style={{ display: 'block', marginBottom: '8px', color: '#666', fontWeight: 'bold' }}>
                 Café/Produto *
               </label>
-              <input
-                type="text"
-                value={productSearch}
-                onChange={(e) => setProductSearch(e.target.value)}
-                required
-                placeholder="Digite para buscar ou criar novo produto"
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  border: '2px solid #DDD',
-                  borderRadius: '8px',
-                  fontSize: '16px'
-                }}
-              />
-              {productSearch && products.length > 0 && (
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="text"
+                  value={productSearch}
+                  onChange={(e) => {
+                    setProductSearch(e.target.value)
+                    // Clear selection if user starts typing a different name
+                    if (selectedProductId && selectedProductName && e.target.value.trim() !== selectedProductName.trim()) {
+                      setSelectedProductId('')
+                      setSelectedProductName('')
+                    }
+                  }}
+                  required
+                  placeholder="Digite para buscar ou criar novo produto"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: selectedProductId ? '2px solid #D2691E' : '2px solid #DDD',
+                    borderRadius: '8px',
+                    fontSize: '16px',
+                    background: selectedProductId ? '#FFF8E7' : '#FFF'
+                  }}
+                />
+                {selectedProductId && (
+                  <div style={{
+                    position: 'absolute',
+                    right: '12px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    color: '#D2691E',
+                    fontSize: '18px'
+                  }}>
+                    ✓
+                  </div>
+                )}
+              </div>
+              {/* Only show dropdown if no product is selected and there are search results */}
+              {productSearch && products.length > 0 && !selectedProductId && (
                 <div
                   style={{
                     marginTop: '8px',
                     border: '1px solid #DDD',
                     borderRadius: '8px',
                     maxHeight: '200px',
-                    overflow: 'auto'
+                    overflow: 'auto',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                    zIndex: 1000,
+                    position: 'relative'
                   }}
                 >
                   {products.map((product) => (
@@ -552,24 +626,75 @@ export function NewContributionModal({ isOpen, onClose, onSuccess }) {
                       key={product.id}
                       onClick={() => {
                         setSelectedProductId(product.id)
+                        setSelectedProductName(product.name)
                         setProductSearch(product.name)
                         setIsNewProduct(false)
+                        setProducts([]) // Hide dropdown immediately after selection
                       }}
                       style={{
                         padding: '12px',
                         cursor: 'pointer',
                         borderBottom: '1px solid #EEE',
-                        background: selectedProductId === product.id ? '#FFF8E7' : '#FFF'
+                        background: '#FFF',
+                        transition: 'background 150ms ease'
                       }}
+                      onMouseEnter={(e) => e.target.style.background = '#FFF8E7'}
+                      onMouseLeave={(e) => e.target.style.background = '#FFF'}
                     >
                       {product.name}
                     </div>
                   ))}
                 </div>
               )}
-              {isNewProduct && productSearch && (
-                <div style={{ marginTop: '8px', color: '#D2691E', fontSize: '14px' }}>
-                  ✨ Novo produto será criado: {productSearch}
+              {selectedProductId && (
+                <div style={{ 
+                  marginTop: '8px', 
+                  padding: '8px 12px',
+                  background: '#E8F5E9',
+                  borderRadius: '6px',
+                  border: '1px solid #4CAF50',
+                  color: '#2E7D32',
+                  fontSize: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <span>✓</span>
+                  <span>Produto selecionado: <strong>{productSearch}</strong></span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedProductId('')
+                      setSelectedProductName('')
+                      setProductSearch('')
+                      setProducts([])
+                      setIsNewProduct(false)
+                    }}
+                    style={{
+                      marginLeft: 'auto',
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#2E7D32',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                      textDecoration: 'underline'
+                    }}
+                  >
+                    Alterar
+                  </button>
+                </div>
+              )}
+              {isNewProduct && productSearch && !selectedProductId && (
+                <div style={{ 
+                  marginTop: '8px', 
+                  padding: '8px 12px',
+                  background: '#FFF3E0',
+                  borderRadius: '6px',
+                  border: '1px solid #FF9800',
+                  color: '#E65100',
+                  fontSize: '14px'
+                }}>
+                  ✨ Novo produto será criado: <strong>{productSearch}</strong>
                 </div>
               )}
             </div>

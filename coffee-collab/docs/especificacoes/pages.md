@@ -156,18 +156,22 @@ Este documento detalha cada página/tela do sistema, seus componentes, comportam
    - **Exibição**: Card destacado com gradiente bege/marrom e borda laranja
    - **Ação**: Botão "Editar Contribuição" que abre modal de edição da primeira contribuição pendente
    - **Status**: ✅ Implementado
+   - **Quando aparece**: Apenas quando o usuário tem contribuições criadas por ele mesmo sem evidência de chegada
 
 2. **"⭐ Não esqueça de dar o seu voto!"**
    - **Condição**: Existe produto sem voto do usuário atual
    - **Exibição**: Card destacado com gradiente bege claro e borda dourada
    - **Ação**: Botão "Ir para Votações" que redireciona para `/votes`
    - **Status**: ✅ Implementado
+   - **Quando aparece**: Quando há produtos no sistema que o usuário ainda não votou
 
-3. **"📊 Menor contribuição dos últimos X meses detectada!"**
-   - **Condição**: Usuário está em última posição (ou dividindo última) no ranking de KGs dos últimos X meses (onde X = `calculationBaseMonths` da configuração)
-   - **Exibição**: Card destacado com gradiente amarelo claro (pode ser cômico/divertido)
-   - **Nota**: X é configurável por admins em Settings
+3. **"📊 Menor saldo detectado!"**
+   - **Condição**: Usuário está em última posição (ou dividindo a última) no ranking de **SALDO** (não total de contribuições)
+   - **Exibição**: Card destacado com gradiente amarelo claro
+   - **Ação**: Apenas informativo (sem botão de ação)
    - **Status**: ✅ Implementado
+   - **Quando aparece**: Quando o saldo do usuário é igual ao menor saldo entre todos os usuários ativos (ou todos têm saldo 0)
+   - **Nota importante**: Este aviso verifica o **SALDO** atual do usuário, não o total de contribuições. O saldo é calculado a partir da última compensação + contribuições após ela.
 
 **Regras dos Avisos**:
 - Aparecem apenas se as condições forem verdadeiras
@@ -352,8 +356,15 @@ Este documento detalha cada página/tela do sistema, seus componentes, comportam
 6. **Café/Produto** *
    - **Componente especial**: Busca com filtro em tempo real
    - Ao digitar, filtra produtos existentes
+   - **Melhorias implementadas**:
+     - Lista de produtos desaparece após seleção
+     - Campo destaca visualmente quando produto está selecionado (borda marrom e fundo bege claro)
+     - Indicador visual ✓ mostra produto selecionado
+     - Badge verde mostra "Produto selecionado: [nome]" com botão "Alterar"
+     - Badge laranja mostra "Novo produto será criado: [nome]" quando não há seleção
    - Pode selecionar produto existente OU digitar nome novo
    - Se digitar nome novo (sem selecionar): cria produto automaticamente ao salvar
+   - **Prevenção de duplicatas**: Ao selecionar um produto, a lista é ocultada para evitar confusão
 
 7. **Evidência Compra** *
    - Campo de texto para colar link do Google Drive OU
@@ -374,22 +385,26 @@ Este documento detalha cada página/tela do sistema, seus componentes, comportam
 ### Regras de Negócio
 
 - **Ao salvar**:
+  - **Atomicidade**: Todas as operações são realizadas de forma atômica usando batch do Firestore
+    - Se qualquer operação falhar, todas são revertidas (all or nothing)
+    - Garante que não haja dados parciais ou inconsistentes
   - Se produto novo foi digitado: Cria produto com:
     - `name`: Nome digitado
     - `description`: null
     - `photoURL`: null
     - `averagePricePerKg`: valor / quantidadeKg
     - `averageRating`: 0
-  - Se produto existente: Atualiza `averagePricePerKg` do produto:
+  - Se produto existente: Atualiza `averagePricePerKg` do produto (após criação bem-sucedida):
     - Recalcula: soma todos os valores / soma todos os KGs
-  - Cria documento em `contributions` com `isDivided` (false por padrão)
+  - Cria documento em `contributions` com `isDivided` (false por padrão) **atomicamente**
   - Se `isDivided: true`:
-    - Cria documentos na subcollection `contributionDetails` para cada participante
+    - Cria documentos na subcollection `contributionDetails` para cada participante **no mesmo batch**
     - Divide `quantityKg` e `value` igualmente entre todos os participantes (incluindo comprador)
-    - Atualiza saldo de todos os participantes com a quantidade atribuída
+    - Atualiza saldo de todos os participantes com a quantidade atribuída (após batch bem-sucedido)
   - Se `isDivided: false`:
-    - Atualiza apenas o saldo do comprador com a quantidade total
+    - Atualiza apenas o saldo do comprador com a quantidade total (após batch bem-sucedido)
   - Processamento de imagens: converte link do Google Drive para URL de imagem direta, ou permite upload manual
+  - **Validações de segurança**: Usuários devem estar ativos (`isActive: true`) para criar contribuições
 
 - **Validações**:
   - Campos obrigatórios (*)

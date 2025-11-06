@@ -114,7 +114,10 @@ Quando `isDivided: true`, cada documento na subcollection representa um particip
 
 **Regras de Segurança**:
 - Leitura: Todos usuários autenticados
-- Escrita: Todos usuários autenticados (admins podem criar para qualquer usuário, usuários comuns apenas para si mesmos)
+- Escrita: Todos usuários autenticados **e ativos** (`isActive: true`)
+  - Admins podem criar contribuições para qualquer usuário
+  - Usuários comuns apenas para si mesmos
+  - Usuários inativos (`isActive: false`) não podem criar contribuições
 
 ---
 
@@ -305,11 +308,11 @@ service cloud.firestore {
       );
     }
     
-    // Contributions - leitura livre, escrita por todos autenticados
+    // Contributions - leitura livre, escrita por todos autenticados e ativos
     match /contributions/{contributionId} {
       allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null && (
+      allow create: if request.auth != null && isAuthenticatedAndActive();
+      allow update, delete: if request.auth != null && isAuthenticatedAndActive() && (
         resource.data.userId == request.auth.uid ||
         isAdmin()
       );
@@ -317,7 +320,7 @@ service cloud.firestore {
       // Contribution details subcollection (para contribuições rachadas)
       match /contributionDetails/{detailId} {
         allow read: if request.auth != null;
-        allow write: if request.auth != null && (
+        allow write: if request.auth != null && isAuthenticatedAndActive() && (
           // Permite se o usuário é o dono da contribuição ou admin
           get(/databases/$(database)/documents/contributions/$(contributionId)).data.userId == request.auth.uid ||
           isAdmin()

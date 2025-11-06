@@ -1,5 +1,5 @@
 // Sidebar navigation component
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useUserProfile } from '../hooks/useUserProfile'
 
@@ -17,6 +17,7 @@ export function Sidebar() {
   const [isExpanded, setIsExpanded] = useState(false)
   const location = useLocation()
   const { profile } = useUserProfile()
+  const navigatingRef = useRef(false)
 
   return (
     <div
@@ -80,6 +81,19 @@ export function Sidebar() {
             <Link
               key={item.path}
               to={item.path}
+              onClick={(e) => {
+                // Prevent navigation if already navigating or clicking active route
+                if (navigatingRef.current || isActive) {
+                  e.preventDefault()
+                  return
+                }
+                
+                // Prevent multiple rapid clicks
+                navigatingRef.current = true
+                setTimeout(() => {
+                  navigatingRef.current = false
+                }, 500)
+              }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -91,10 +105,11 @@ export function Sidebar() {
                 color: isActive ? '#FFF' : '#FFF8DC',
                 background: isActive ? 'rgba(255, 255, 255, 0.2)' : 'transparent',
                 transition: 'all 150ms ease',
-                cursor: 'pointer'
+                cursor: isActive ? 'default' : 'pointer',
+                pointerEvents: navigatingRef.current ? 'none' : 'auto'
               }}
               onMouseEnter={(e) => {
-                if (!isActive) {
+                if (!isActive && !navigatingRef.current) {
                   e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'
                 }
               }}

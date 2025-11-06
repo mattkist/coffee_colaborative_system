@@ -90,18 +90,31 @@ export function Landing() {
         textAlign: 'center'
       }}
     >
+      
       <img 
-        src={`${import.meta.env.BASE_URL}meuCafeGrao_logo_transparent.png`}
+        src={`${import.meta.env.BASE_URL}logo_mini.png`}
         alt="CAFÉ GRÃO" 
         style={{ 
-          height: '120px', 
+          height: '240px', 
           width: 'auto',
           maxWidth: '400px',
           objectFit: 'contain',
-          marginBottom: '24px',
           filter: 'drop-shadow(2px 2px 4px rgba(0, 0, 0, 0.3))'
         }} 
       />
+
+      <h1
+        style={{
+          fontSize: '64px',
+          fontWeight: 'bold',
+          color: '#332518',
+          textShadow: '2px 2px 4px rgba(0, 0, 0, 0.3)',
+          marginBottom: '24px',
+          letterSpacing: '2px'
+        }}
+      >
+        meu CAFÉ GRÃO
+      </h1>
 
       <div style={{ marginBottom: '48px', maxWidth: '600px' }}>
         <p

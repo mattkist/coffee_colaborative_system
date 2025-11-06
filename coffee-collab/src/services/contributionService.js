@@ -20,94 +20,118 @@ import { getUserProfile, updateUserProfile } from './userService'
 import { shouldTriggerCompensation, executeAutomaticCompensation } from './compensationService'
 
 /**
- * Create a new contribution
+ * Create a new contribution with atomicity
+ * All operations (contribution creation, details creation) are done atomically using batch
  */
 export async function createContribution(contributionData) {
-  const contributionsRef = collection(db, 'contributions')
-  
   const isDivided = contributionData.isDivided || false
   const participantUserIds = contributionData.participantUserIds || []
   
-  const newContribution = {
-    userId: contributionData.userId,
-    purchaseDate: Timestamp.fromDate(new Date(contributionData.purchaseDate)),
-    value: contributionData.value,
-    quantityKg: contributionData.quantityKg,
-    productId: contributionData.productId,
-    purchaseEvidence: contributionData.purchaseEvidence || null,
-    arrivalEvidence: contributionData.arrivalEvidence || null,
-    arrivalDate: contributionData.arrivalDate 
-      ? Timestamp.fromDate(new Date(contributionData.arrivalDate))
-      : null,
-    isDivided: isDivided,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  }
-
-  const docRef = await addDoc(contributionsRef, newContribution)
-  const contributionId = docRef.id
-  
-  // Recalculate product average price
-  await updateProductAveragePrice(contributionData.productId)
-  
-  // Handle divided contributions
-  if (isDivided && participantUserIds.length > 0) {
-    // All participants including the buyer
-    const allParticipants = [...new Set([contributionData.userId, ...participantUserIds])]
-    const totalParticipants = allParticipants.length
-    const quantityPerPerson = contributionData.quantityKg / totalParticipants
-    const valuePerPerson = contributionData.value / totalParticipants
+  try {
+    // Prepare data before batch operations
+    const contributionsRef = collection(db, 'contributions')
+    const contributionId = doc(contributionsRef).id // Generate ID upfront
     
-    // Create contribution details subcollection
-    const detailsRef = collection(db, 'contributions', contributionId, 'contributionDetails')
+    const newContribution = {
+      userId: contributionData.userId,
+      purchaseDate: Timestamp.fromDate(new Date(contributionData.purchaseDate)),
+      value: contributionData.value,
+      quantityKg: contributionData.quantityKg,
+      productId: contributionData.productId,
+      purchaseEvidence: contributionData.purchaseEvidence || null,
+      arrivalEvidence: contributionData.arrivalEvidence || null,
+      arrivalDate: contributionData.arrivalDate 
+        ? Timestamp.fromDate(new Date(contributionData.arrivalDate))
+        : null,
+      isDivided: isDivided,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }
+
+    // Get user profiles before batch (for divided contributions)
+    let userProfiles = []
+    if (isDivided && participantUserIds.length > 0) {
+      const allParticipants = [...new Set([contributionData.userId, ...participantUserIds])]
+      userProfiles = await Promise.all(
+        allParticipants.map(userId => getUserProfile(userId))
+      )
+    }
+
+    // Use batch to ensure atomicity
     const batch = writeBatch(db)
     
-    // Get all user profiles to get names
-    const userProfiles = await Promise.all(
-      allParticipants.map(userId => getUserProfile(userId))
-    )
+    // Create contribution document
+    const contributionRef = doc(db, 'contributions', contributionId)
+    batch.set(contributionRef, newContribution)
     
-    // Create detail for each participant
-    for (let i = 0; i < allParticipants.length; i++) {
-      const userId = allParticipants[i]
-      const userProfile = userProfiles[i]
+    // Handle divided contributions
+    if (isDivided && participantUserIds.length > 0) {
+      // All participants including the buyer
+      const allParticipants = [...new Set([contributionData.userId, ...participantUserIds])]
+      const totalParticipants = allParticipants.length
+      const quantityPerPerson = contributionData.quantityKg / totalParticipants
+      const valuePerPerson = contributionData.value / totalParticipants
       
-      if (userProfile) {
-        const detailRef = doc(detailsRef)
-        batch.set(detailRef, {
-          userId: userId,
-          userName: userProfile.name || 'Usuário desconhecido',
-          quantityKg: quantityPerPerson,
-          value: valuePerPerson,
-          createdAt: serverTimestamp()
-        })
+      // Create contribution details subcollection
+      const detailsRef = collection(db, 'contributions', contributionId, 'contributionDetails')
+      
+      // Create detail for each participant
+      for (let i = 0; i < allParticipants.length; i++) {
+        const userId = allParticipants[i]
+        const userProfile = userProfiles[i]
         
-        // Update user balance (increase by quantityPerPerson)
-        const user = await getUserProfile(userId)
-        if (user) {
-          const newBalance = (user.balance || 0) + quantityPerPerson
-          await updateUserProfile(userId, { balance: newBalance })
+        if (userProfile) {
+          const detailRef = doc(detailsRef)
+          batch.set(detailRef, {
+            userId: userId,
+            userName: userProfile.name || 'Usuário desconhecido',
+            quantityKg: quantityPerPerson,
+            value: valuePerPerson,
+            createdAt: serverTimestamp()
+          })
         }
       }
     }
     
+    // Commit batch atomically - all or nothing
     await batch.commit()
-  } else {
-    // Regular contribution - update only the buyer's balance
-    const user = await getUserProfile(contributionData.userId)
-    if (user) {
-      const newBalance = (user.balance || 0) + contributionData.quantityKg
-      await updateUserProfile(contributionData.userId, { balance: newBalance })
+    
+    // After successful batch commit, update product average price
+    // This is done outside the batch because it requires reading all contributions
+    try {
+      await updateProductAveragePrice(contributionData.productId)
+    } catch (error) {
+      console.error('Error updating product average price:', error)
+      // Don't fail the whole operation if product update fails
     }
+    
+    // Reprocess all user balances to ensure accuracy
+    // This recalculates from last compensation + contributions after it
+    try {
+      const { reprocessAllUserBalances } = await import('./userService')
+      await reprocessAllUserBalances()
+    } catch (error) {
+      console.error('Error reprocessing balances:', error)
+      // Don't fail the whole operation if balance reprocessing fails
+      // The balance will be corrected on next reprocessing
+    }
+    
+    // Check if compensation should be triggered
+    try {
+      const shouldTrigger = await shouldTriggerCompensation()
+      if (shouldTrigger) {
+        await executeAutomaticCompensation()
+      }
+    } catch (error) {
+      console.error('Error checking/executing compensation:', error)
+      // Don't fail the whole operation if compensation check fails
+    }
+    
+    return contributionId
+  } catch (error) {
+    console.error('Error creating contribution:', error)
+    throw new Error(`Erro ao criar contribuição: ${error.message}`)
   }
-  
-  // Check if compensation should be triggered
-  const shouldTrigger = await shouldTriggerCompensation()
-  if (shouldTrigger) {
-    await executeAutomaticCompensation()
-  }
-  
-  return contributionId
 }
 
 /**
@@ -207,7 +231,8 @@ export async function getContributionDetails(contributionId) {
 }
 
 /**
- * Update contribution
+ * Update contribution with atomicity
+ * All operations (contribution update, details update/deletion) are done atomically using batch
  */
 export async function updateContribution(contributionId, updates) {
   const contribution = await getContributionById(contributionId)
@@ -215,177 +240,150 @@ export async function updateContribution(contributionId, updates) {
     throw new Error('Contribution not found')
   }
 
-  const contributionRef = doc(db, 'contributions', contributionId)
-  
-  const updateData = {
-    ...updates,
-    updatedAt: serverTimestamp()
-  }
-  
-  // Convert dates to Timestamps if present
-  if (updates.purchaseDate) {
-    updateData.purchaseDate = Timestamp.fromDate(new Date(updates.purchaseDate))
-  }
-  if (updates.arrivalDate) {
-    updateData.arrivalDate = Timestamp.fromDate(new Date(updates.arrivalDate))
-  }
-  
-  const isDivided = updates.isDivided !== undefined ? updates.isDivided : (contribution.isDivided || false)
-  const participantUserIds = updates.participantUserIds || []
-  const skipBalanceUpdate = updates.skipBalanceUpdate || false
-  
-  // Remove skipBalanceUpdate from updateData as it's not a field to save
-  delete updateData.skipBalanceUpdate
-  
-  // Handle divided contribution changes (only if not skipping balance updates)
-  if (!skipBalanceUpdate && isDivided && participantUserIds.length > 0) {
-    // First, revert old balances if contribution was previously divided
-    if (contribution.isDivided && contribution.details) {
-      for (const detail of contribution.details) {
-        const user = await getUserProfile(detail.userId)
-        if (user) {
-          const newBalance = Math.max(0, (user.balance || 0) - (detail.quantityKg || 0))
-          await updateUserProfile(detail.userId, { balance: newBalance })
-        }
-      }
-    } else if (!contribution.isDivided) {
-      // Was regular, now divided - revert buyer's balance
-      const user = await getUserProfile(contribution.userId)
-      if (user) {
-        const newBalance = Math.max(0, (user.balance || 0) - (contribution.quantityKg || 0))
-        await updateUserProfile(contribution.userId, { balance: newBalance })
-      }
-    } else {
-      // Was divided, now regular - revert all participants
-      if (contribution.details) {
-        for (const detail of contribution.details) {
-          const user = await getUserProfile(detail.userId)
-          if (user) {
-            const newBalance = Math.max(0, (user.balance || 0) - (detail.quantityKg || 0))
-            await updateUserProfile(detail.userId, { balance: newBalance })
-          }
-        }
-      }
+  try {
+    const contributionRef = doc(db, 'contributions', contributionId)
+    
+    const updateData = {
+      ...updates,
+      updatedAt: serverTimestamp()
     }
     
-    // Delete old details
-    const detailsRef = collection(db, 'contributions', contributionId, 'contributionDetails')
-    const oldDetailsSnapshot = await getDocs(detailsRef)
+    // Convert dates to Timestamps if present
+    if (updates.purchaseDate) {
+      updateData.purchaseDate = Timestamp.fromDate(new Date(updates.purchaseDate))
+    }
+    if (updates.arrivalDate) {
+      updateData.arrivalDate = Timestamp.fromDate(new Date(updates.arrivalDate))
+    }
+    
+    const isDivided = updates.isDivided !== undefined ? updates.isDivided : (contribution.isDivided || false)
+    const participantUserIds = updates.participantUserIds || []
+    const skipBalanceUpdate = updates.skipBalanceUpdate || false
+    
+    // Remove skipBalanceUpdate from updateData as it's not a field to save
+    delete updateData.skipBalanceUpdate
+    
+    // Prepare user profiles before batch (if needed)
+    let userProfiles = []
+    if (!skipBalanceUpdate && isDivided && participantUserIds.length > 0) {
+      const allParticipants = [...new Set([contribution.userId, ...participantUserIds])]
+      userProfiles = await Promise.all(
+        allParticipants.map(userId => getUserProfile(userId))
+      )
+    }
+    
+    // Use single batch to ensure atomicity
     const batch = writeBatch(db)
-    oldDetailsSnapshot.docs.forEach(detailDoc => {
-      batch.delete(detailDoc.ref)
-    })
-    await batch.commit()
     
-    // Create new details
-    const allParticipants = [...new Set([contribution.userId, ...participantUserIds])]
-    const totalParticipants = allParticipants.length
-    const quantityKg = updates.quantityKg !== undefined ? updates.quantityKg : contribution.quantityKg
-    const value = updates.value !== undefined ? updates.value : contribution.value
-    const quantityPerPerson = quantityKg / totalParticipants
-    const valuePerPerson = value / totalParticipants
+    // Update contribution document
+    batch.update(contributionRef, updateData)
     
-    const newDetailsRef = collection(db, 'contributions', contributionId, 'contributionDetails')
-    const newBatch = writeBatch(db)
-    
-    const userProfiles = await Promise.all(
-      allParticipants.map(userId => getUserProfile(userId))
-    )
-    
-    for (let i = 0; i < allParticipants.length; i++) {
-      const userId = allParticipants[i]
-      const userProfile = userProfiles[i]
+    // Handle divided contribution changes (only if not skipping balance updates)
+    if (!skipBalanceUpdate && isDivided && participantUserIds.length > 0) {
+      // Delete old details
+      const detailsRef = collection(db, 'contributions', contributionId, 'contributionDetails')
+      const oldDetailsSnapshot = await getDocs(detailsRef)
+      oldDetailsSnapshot.docs.forEach(detailDoc => {
+        batch.delete(detailDoc.ref)
+      })
       
-      if (userProfile) {
-        const detailRef = doc(newDetailsRef)
-        newBatch.set(detailRef, {
-          userId: userId,
-          userName: userProfile.name || 'Usuário desconhecido',
-          quantityKg: quantityPerPerson,
-          value: valuePerPerson,
-          createdAt: serverTimestamp()
-        })
+      // Create new details
+      const allParticipants = [...new Set([contribution.userId, ...participantUserIds])]
+      const totalParticipants = allParticipants.length
+      const quantityKg = updates.quantityKg !== undefined ? updates.quantityKg : contribution.quantityKg
+      const value = updates.value !== undefined ? updates.value : contribution.value
+      const quantityPerPerson = quantityKg / totalParticipants
+      const valuePerPerson = value / totalParticipants
+      
+      const newDetailsRef = collection(db, 'contributions', contributionId, 'contributionDetails')
+      
+      for (let i = 0; i < allParticipants.length; i++) {
+        const userId = allParticipants[i]
+        const userProfile = userProfiles[i]
         
-        const user = await getUserProfile(userId)
-        if (user) {
-          const newBalance = (user.balance || 0) + quantityPerPerson
-          await updateUserProfile(userId, { balance: newBalance })
+        if (userProfile) {
+          const detailRef = doc(newDetailsRef)
+          batch.set(detailRef, {
+            userId: userId,
+            userName: userProfile.name || 'Usuário desconhecido',
+            quantityKg: quantityPerPerson,
+            value: valuePerPerson,
+            createdAt: serverTimestamp()
+          })
         }
       }
+      
+      updateData.isDivided = true
+    } else if (!skipBalanceUpdate && !isDivided && contribution.isDivided) {
+      // Was divided, now regular - delete details
+      const detailsRef = collection(db, 'contributions', contributionId, 'contributionDetails')
+      const oldDetailsSnapshot = await getDocs(detailsRef)
+      oldDetailsSnapshot.docs.forEach(detailDoc => {
+        batch.delete(detailDoc.ref)
+      })
+      
+      updateData.isDivided = false
     }
     
-    await newBatch.commit()
-    updateData.isDivided = true
-  } else if (!skipBalanceUpdate && !isDivided && contribution.isDivided) {
-    // Was divided, now regular - revert all participants and restore buyer's full balance
-    if (contribution.details) {
-      for (const detail of contribution.details) {
-        const user = await getUserProfile(detail.userId)
-        if (user) {
-          const newBalance = Math.max(0, (user.balance || 0) - (detail.quantityKg || 0))
-          await updateUserProfile(detail.userId, { balance: newBalance })
-        }
-      }
+    // If skipping balance update, still update isDivided flag if changed
+    if (skipBalanceUpdate && updates.isDivided !== undefined) {
+      updateData.isDivided = updates.isDivided
+      batch.update(contributionRef, { isDivided: updates.isDivided })
     }
     
-    // Delete details
-    const detailsRef = collection(db, 'contributions', contributionId, 'contributionDetails')
-    const oldDetailsSnapshot = await getDocs(detailsRef)
-    const batch = writeBatch(db)
-    oldDetailsSnapshot.docs.forEach(detailDoc => {
-      batch.delete(detailDoc.ref)
-    })
+    // Commit batch atomically - all or nothing
     await batch.commit()
     
-    // Restore buyer's full balance
-    const quantityKg = updates.quantityKg !== undefined ? updates.quantityKg : contribution.quantityKg
-    const user = await getUserProfile(contribution.userId)
-    if (user) {
-      const newBalance = (user.balance || 0) + quantityKg
-      await updateUserProfile(contribution.userId, { balance: newBalance })
-    }
-    
-    updateData.isDivided = false
-  } else if (!skipBalanceUpdate) {
-    // Regular contribution update (only if not skipping balance updates)
-    const oldQuantityKg = contribution.quantityKg || 0
-    const newQuantityKg = updates.quantityKg !== undefined ? updates.quantityKg : oldQuantityKg
-    
-    if (oldQuantityKg !== newQuantityKg) {
-      const user = await getUserProfile(contribution.userId)
-      if (user) {
-        const balanceDiff = newQuantityKg - oldQuantityKg
-        const newBalance = (user.balance || 0) + balanceDiff
-        await updateUserProfile(contribution.userId, { balance: Math.max(0, newBalance) })
+    // After successful batch commit, update product average price if needed
+    if (updates.value !== undefined || updates.quantityKg !== undefined) {
+      try {
+        await updateProductAveragePrice(contribution.productId)
+      } catch (error) {
+        console.error('Error updating product average price:', error)
+        // Don't fail the whole operation if product update fails
       }
     }
-  }
-  
-  // If skipping balance update, still update isDivided flag if changed
-  if (skipBalanceUpdate && updates.isDivided !== undefined) {
-    updateData.isDivided = updates.isDivided
-  }
-  
-  await updateDoc(contributionRef, updateData)
-  
-  // Recalculate product average price if value or quantity changed
-  if (updates.value !== undefined || updates.quantityKg !== undefined) {
-    await updateProductAveragePrice(contribution.productId)
-  }
-  
-  // If arrivalEvidence was added and product has no photo, use it as product photo
-  if (updates.arrivalEvidence) {
-    const { getProductById, updateProduct } = await import('./productService')
-    const product = await getProductById(contribution.productId)
-    if (product && !product.photoURL) {
-      await updateProduct(contribution.productId, { photoURL: updates.arrivalEvidence })
+    
+    // If arrivalEvidence was added and product has no photo, use it as product photo
+    if (updates.arrivalEvidence) {
+      try {
+        const { getProductById, updateProduct } = await import('./productService')
+        const product = await getProductById(contribution.productId)
+        if (product && !product.photoURL) {
+          await updateProduct(contribution.productId, { photoURL: updates.arrivalEvidence })
+        }
+      } catch (error) {
+        console.error('Error updating product photo:', error)
+        // Don't fail the whole operation if product photo update fails
+      }
     }
-  }
-  
-  // Check if compensation should be triggered
-  const shouldTrigger = await shouldTriggerCompensation()
-  if (shouldTrigger) {
-    await executeAutomaticCompensation()
+    
+    // Reprocess all user balances to ensure accuracy (only if not skipping balance update)
+    // This recalculates from last compensation + contributions after it
+    if (!skipBalanceUpdate) {
+      try {
+        const { reprocessAllUserBalances } = await import('./userService')
+        await reprocessAllUserBalances()
+      } catch (error) {
+        console.error('Error reprocessing balances:', error)
+        // Don't fail the whole operation if balance reprocessing fails
+        // The balance will be corrected on next reprocessing
+      }
+    }
+    
+    // Check if compensation should be triggered
+    try {
+      const shouldTrigger = await shouldTriggerCompensation()
+      if (shouldTrigger) {
+        await executeAutomaticCompensation()
+      }
+    } catch (error) {
+      console.error('Error checking/executing compensation:', error)
+      // Don't fail the whole operation if compensation check fails
+    }
+  } catch (error) {
+    console.error('Error updating contribution:', error)
+    throw new Error(`Erro ao atualizar contribuição: ${error.message}`)
   }
 }
 
@@ -396,18 +394,9 @@ export async function deleteContribution(contributionId) {
   const contribution = await getContributionById(contributionId)
   const contributionRef = doc(db, 'contributions', contributionId)
   
-  // Update user balance (decrease by quantityKg)
+  // Delete contribution details if it's divided
   if (contribution) {
     if (contribution.isDivided && contribution.details) {
-      // Revert balances for all participants
-      for (const detail of contribution.details) {
-        const user = await getUserProfile(detail.userId)
-        if (user) {
-          const newBalance = Math.max(0, (user.balance || 0) - (detail.quantityKg || 0))
-          await updateUserProfile(detail.userId, { balance: newBalance })
-        }
-      }
-      
       // Delete details
       const detailsRef = collection(db, 'contributions', contributionId, 'contributionDetails')
       const detailsSnapshot = await getDocs(detailsRef)
@@ -416,19 +405,17 @@ export async function deleteContribution(contributionId) {
         batch.delete(detailDoc.ref)
       })
       await batch.commit()
-    } else {
-      // Regular contribution
-      const user = await getUserProfile(contribution.userId)
-      if (user) {
-        const newBalance = Math.max(0, (user.balance || 0) - (contribution.quantityKg || 0))
-        await updateUserProfile(contribution.userId, { balance: newBalance })
-      }
     }
     
     await updateProductAveragePrice(contribution.productId)
   }
   
   await deleteDoc(contributionRef)
+  
+  // Reprocess all user balances to ensure accuracy
+  // This recalculates from last compensation + contributions after it
+  const { reprocessAllUserBalances } = await import('./userService')
+  await reprocessAllUserBalances()
 }
 
 /**

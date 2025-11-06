@@ -1,5 +1,5 @@
 // Protected route component
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { getUserProfile } from '../services/userService'
@@ -8,26 +8,56 @@ export function ProtectedRoute({ children, requireActive = false }) {
   const { user, loading: authLoading } = useAuth()
   const [profile, setProfile] = useState(null)
   const [profileLoading, setProfileLoading] = useState(true)
+  const isMountedRef = useRef(true)
+  const loadingRef = useRef(false)
 
   useEffect(() => {
+    isMountedRef.current = true
+    
     const loadProfile = async () => {
       if (!user) {
-        setProfileLoading(false)
+        if (isMountedRef.current) {
+          setProfileLoading(false)
+        }
+        return
+      }
+
+      // Prevent multiple simultaneous loads
+      if (loadingRef.current) {
         return
       }
 
       try {
+        loadingRef.current = true
         const userProfile = await getUserProfile(user.uid)
-        setProfile(userProfile)
+        
+        // Only update state if component is still mounted
+        if (isMountedRef.current) {
+          setProfile(userProfile)
+        }
       } catch (error) {
         console.error('Error loading profile:', error)
+        // Only update state if component is still mounted
+        if (isMountedRef.current) {
+          setProfile(null)
+        }
       } finally {
-        setProfileLoading(false)
+        loadingRef.current = false
+        if (isMountedRef.current) {
+          setProfileLoading(false)
+        }
       }
     }
 
     if (user) {
       loadProfile()
+    } else {
+      setProfileLoading(false)
+    }
+
+    return () => {
+      isMountedRef.current = false
+      loadingRef.current = false
     }
   }, [user])
 

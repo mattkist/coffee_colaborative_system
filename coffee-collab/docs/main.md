@@ -221,6 +221,9 @@ docs/
 ├── arquitetura.md            # Arquitetura do sistema e decisões técnicas
 ├── database.md               # Estrutura completa do banco de dados
 ├── design-style.md           # Diretrizes de design e estilo visual
+├── migration-balance-system.md # Migração para sistema de saldo e compensações
+├── balance-reprocessing.md    # Sistema de reprocessamento de saldos
+├── alerts-system.md          # Sistema de avisos (alerts)
 ├── especificacoes/           # Especificações de telas e funcionalidades
 │   ├── README.md             # Índice das especificações
 │   └── pages.md              # Especificações detalhadas de todas as páginas
@@ -235,6 +238,10 @@ docs/
 - **[arquitetura.md](./arquitetura.md)** - Arquitetura e decisões técnicas
 - **[database.md](./database.md)** - Estrutura completa do banco de dados Firestore
 - **[design-style.md](./design-style.md)** - Diretrizes de design e estilo visual
+- **[migration-balance-system.md](./migration-balance-system.md)** - Migração para sistema de saldo e compensações
+- **[balance-reprocessing.md](./balance-reprocessing.md)** - Sistema de reprocessamento de saldos
+- **[alerts-system.md](./alerts-system.md)** - Sistema de avisos (alerts) na Home
+- **[atomicity-improvements.md](./atomicity-improvements.md)** - Melhorias de atomicidade nas operações de contribuições
 - **[especificacoes/pages.md](./especificacoes/pages.md)** - Especificações detalhadas de todas as páginas
 
 ### Documentos a Criar (Futuro)
