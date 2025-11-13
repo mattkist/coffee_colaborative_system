@@ -214,3 +214,4 @@ Operações não-críticas que falham:
 **Implementado por**: Melhorias de atomicidade e segurança
 
 
+
